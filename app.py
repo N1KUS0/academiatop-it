@@ -144,8 +144,20 @@ def check_csrf():
             abort(400, "Неверный CSRF-токен. Обновите страницу и повторите.")
 
 
+_static_versions = {}
+
+
+def static_url(filename):
+    """Ссылка на файл из static/ с версией по содержимому. nginx отдаёт статику с expires 7d,
+    и без версии браузер (особенно на телефоне) после обновления сайта показывал бы старые стили и скрипты."""
+    if filename not in _static_versions:
+        with open(os.path.join(app.static_folder, filename), "rb") as f:
+            _static_versions[filename] = hashlib.md5(f.read()).hexdigest()[:10]
+    return url_for("static", filename=filename, v=_static_versions[filename])
+
+
 # Глобальные переменные нужны и в импортируемых макросах, поэтому не через context_processor.
-app.jinja_env.globals.update(csrf_token=csrf_token, SITE_NAME=SITE_NAME, SITE_TAGLINE=SITE_TAGLINE,
+app.jinja_env.globals.update(csrf_token=csrf_token, static_url=static_url, SITE_NAME=SITE_NAME, SITE_TAGLINE=SITE_TAGLINE,
                              SITE_AUTHOR=SITE_AUTHOR, CATEGORIES=CATEGORIES,
                              LICENSE_TYPES=LICENSE_TYPES, STATUSES=STATUSES,
                              TICKET_KINDS=TICKET_KINDS, TICKET_STATUSES=TICKET_STATUSES)
