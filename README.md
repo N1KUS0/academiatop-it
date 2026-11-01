@@ -27,11 +27,16 @@
 
 ## Установка на Debian 12
 
-Скопируйте папку проекта на сервер (например, через `scp` или флешку) и выполните в ней:
+Склонируйте репозиторий на сервер и запустите установку из него:
 
 ```bash
-sudo bash deploy/install.sh
+git clone https://github.com/N1KUS0/academiatop-it.git ~/academiatop-it
 ```
+```bash
+cd ~/academiatop-it && sudo bash deploy/install.sh
+```
+
+Если репозиторий приватный, серверу нужен доступ: создайте ключ `ssh-keygen -t ed25519`, добавьте `~/.ssh/id_ed25519.pub` на GitHub в Settings → Deploy keys (только чтение) и клонируйте по адресу `git@github.com:N1KUS0/academiatop-it.git`. Без git можно скопировать папку проекта через `scp` или флешку и запустить `sudo bash deploy/install.sh` в ней.
 
 Скрипт:
 - ставит Python, nginx и sqlite3;
@@ -61,7 +66,15 @@ cd /opt/registry && sudo -u registry REGISTRY_DB=/opt/registry/instance/registry
 cd /opt/registry && sudo -u registry REGISTRY_DB=/opt/registry/instance/registry.db .venv/bin/flask --app app del-user ivanov
 ```
 
-**Обновление:** скопируйте новую версию проекта и снова запустите `sudo bash deploy/install.sh`. База в `/opt/registry/instance/` при этом не затрагивается.
+**Обновление** — после `git push` выполните на сервере:
+
+```bash
+cd ~/academiatop-it && bash deploy/update.sh
+```
+
+Скрипт забирает изменения из GitHub (`git pull`), делает копию базы в `/var/backups/registry/pre-update-*.db` (хранятся 10 последних), копирует файлы в `/opt/registry` и перезапускает службу. Зависимости Python, служба systemd и конфиг nginx обновляются, только если они изменились. Если новых коммитов нет, скрипт ничего не делает; обновить всё равно — `bash deploy/update.sh --force`. Если служба после обновления не запустилась, скрипт покажет журнал.
+
+`deploy/update.sh` не ставит пакеты. При смене версии Debian или если что-то сломалось, запустите полную установку ещё раз: `sudo bash deploy/install.sh`. База в `/opt/registry/instance/` при обновлении не затрагивается.
 
 ## Доступ из интернета: academiatop-blg.ru
 
@@ -172,5 +185,5 @@ python -m venv .venv && .venv\Scripts\pip install -r requirements.txt
 | `telegram.py` | уведомления о заявках через Telegram-бота |
 | `templates/` | страницы |
 | `static/` | стили и скрипты (без внешних CDN, работает без интернета) |
-| `deploy/` | установка на Debian: systemd, nginx, бэкап |
+| `deploy/` | установка (`install.sh`) и быстрое обновление из GitHub (`update.sh`) на Debian: systemd, nginx, бэкап |
 | `instance/registry.db` | сама база (создаётся автоматически) |
