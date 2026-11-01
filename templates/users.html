@@ -10,7 +10,8 @@
   <form method="post" action="{{ url_for('user_new') }}" class="form-row">
     {{ csrf() }}
     <label>Логин <input type="text" name="username" required maxlength="50" autocomplete="off"></label>
-    <label class="grow">ФИО / должность <input type="text" name="full_name" maxlength="200"></label>
+    <label class="grow">Имя <input type="text" name="full_name" maxlength="200" placeholder="Иванов Иван Иванович"></label>
+    <label class="grow">Должность <input type="text" name="position" maxlength="200" placeholder="преподаватель"></label>
     <label>Пароль <input type="text" name="password" required minlength="{{ min_len }}" autocomplete="new-password"
                          placeholder="не короче {{ min_len }} символов"></label>
     <button class="btn btn-primary">Создать</button>
@@ -20,12 +21,14 @@
 {% if users %}
 <div class="table-wrap">
   <table class="table">
-    <thead><tr><th>Логин</th><th>ФИО / должность</th><th>Создан</th><th>Последний вход</th><th>Новый пароль</th><th></th></tr></thead>
+    <thead><tr><th>Логин</th><th>Имя</th><th>Должность</th><th class="num">Заявок</th><th>Создан</th><th>Последний вход</th><th>Новый пароль</th><th></th></tr></thead>
     <tbody>
     {% for u in users %}
       <tr>
-        <td><a href="{{ url_for('user_edit', user_id=u.id) }}" class="strong">{{ u.username }}</a></td>
+        <td><a href="{{ url_for('user_profile', user_id=u.id) }}" class="strong">{{ u.username }}</a></td>
         <td>{{ u.full_name or '—' }}</td>
+        <td>{{ u.position or '—' }}</td>
+        <td class="num">{{ u.tickets or '—' }}</td>
         <td>{{ u.created_at | ru_date }}</td>
         <td>{{ u.last_login or 'ещё не входил' }}</td>
         <td>
@@ -37,7 +40,7 @@
           </form>
         </td>
         <td class="num nowrap">
-          <a class="btn btn-sm" href="{{ url_for('user_edit', user_id=u.id) }}">Изменить</a>
+          <a class="btn btn-sm" href="{{ url_for('user_profile', user_id=u.id) }}">Профиль</a>
           {{ delete_button(url_for('user_delete', user_id=u.id), 'Удалить',
                            'Удалить пользователя ' ~ u.username ~ '?') }}</td>
       </tr>

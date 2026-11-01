@@ -273,10 +273,11 @@ def validate_password(password, admin=False):
     return None
 
 
-def create_user(username, password, full_name=""):
+def create_user(username, password, full_name="", position=""):
     conn = get_db()
-    conn.execute("INSERT INTO users (username, full_name, password_hash, created_at) VALUES (?, ?, ?, ?)",
-                 (username, full_name, generate_password_hash(password), date.today().isoformat()))
+    conn.execute("INSERT INTO users (username, full_name, position, password_hash, created_at) "
+                 "VALUES (?, ?, ?, ?, ?)",
+                 (username, full_name, position, generate_password_hash(password), date.today().isoformat()))
     conn.commit()
 
 
@@ -291,7 +292,9 @@ def delete_user(conn, user_id):
 @app.route("/users")
 @admin_required
 def users_page():
-    users = get_db().execute("SELECT * FROM users ORDER BY username COLLATE NOCASE").fetchall()
+    users = get_db().execute(
+        """SELECT u.*, (SELECT COUNT(*) FROM tickets t WHERE t.author_id = u.id) AS tickets
+           FROM users u ORDER BY u.username COLLATE NOCASE""").fetchall()
     return render_template("users.html", users=users, min_len=MIN_PASSWORD_LEN)
 
 
@@ -303,7 +306,7 @@ def user_new():
     if error:
         flash(error, "danger")
     else:
-        create_user(username, password, form_str("full_name"))
+        create_user(username, password, form_str("full_name"), form_str("position"))
         app.logger.warning("user created: %s", username)
         flash(f"Пользователь «{username}» создан. Передайте ему логин и пароль.", "success")
     return redirect(url_for("users_page"))
@@ -317,20 +320,26 @@ def get_user_or_404(user_id):
 
 
 @app.route("/users/<int:user_id>", methods=["GET", "POST"])
-@admin_required
-def user_edit(user_id):
-    """Профиль пользователя: логин и ФИО / должность."""
+def user_profile(user_id):
+    """Профиль пользователя. Смотреть могут все вошедшие (заявки и так видны всем).
+    Администратор меняет логин, имя и должность, сам пользователь — только своё имя."""
     user = get_user_or_404(user_id)
-    form = dict(username=user["username"], full_name=user["full_name"])
+    me = current_user()
+    is_self = me["id"] == user_id
+    form = dict(username=user["username"], full_name=user["full_name"], position=user["position"])
     if request.method == "POST":
-        form = dict(username=form_str("username", 60), full_name=form_str("full_name"))
+        if not (me["admin"] or is_self):
+            abort(403)
+        form["full_name"] = form_str("full_name")
+        if me["admin"]:
+            form.update(username=form_str("username", 60), position=form_str("position"))
         error = validate_username(form["username"], user_id)
         if error:
             flash(error, "danger")
         else:
             conn = get_db()
-            conn.execute("UPDATE users SET username = ?, full_name = ? WHERE id = ?",
-                         (form["username"], form["full_name"], user_id))
+            conn.execute("UPDATE users SET username = ?, full_name = ?, position = ? WHERE id = ?",
+                         (form["username"], form["full_name"], form["position"], user_id))
             # Автор в заявках показывается по профилю; в переписке остаются имена на момент сообщения.
             conn.execute("UPDATE tickets SET author_username = ?, author_name = ? WHERE author_id = ?",
                          (form["username"], form["full_name"] or form["username"], user_id))
@@ -339,15 +348,18 @@ def user_edit(user_id):
                 app.logger.warning("user renamed: %s -> %s", user["username"], form["username"])
             flash("Профиль сохранён." + (f" Новый логин для входа — «{form['username']}»."
                                           if form["username"] != user["username"] else ""), "success")
-            return redirect(url_for("user_edit", user_id=user_id))
-    tickets = get_db().execute("SELECT COUNT(*) FROM tickets WHERE author_id = ?", (user_id,)).fetchone()[0]
-    return render_template("user_edit.html", user=user, form=form, tickets=tickets, min_len=MIN_PASSWORD_LEN)
+            return redirect(url_for("user_profile", user_id=user_id))
+    tickets = [ticket_dict(r) for r in get_db().execute(
+        TICKETS_SQL + " WHERE t.author_id = ? ORDER BY t.status IN ('done', 'rejected'), t.updated_at DESC, t.id DESC",
+        (me["id"], user_id))]
+    return render_template("user_profile.html", user=user, form=form, tickets=tickets, is_self=is_self,
+                           min_len=MIN_PASSWORD_LEN)
 
 
 @app.route("/users/<int:user_id>/password", methods=["POST"])
 @admin_required
 def user_password(user_id):
-    back = url_for("user_edit", user_id=user_id) if request.form.get("back") == "edit" else url_for("users_page")
+    back = url_for("user_profile", user_id=user_id) if request.form.get("back") == "edit" else url_for("users_page")
     password = request.form.get("password", "")
     error = validate_password(password)
     if error:
@@ -378,8 +390,10 @@ def user_delete(user_id):
 
 @app.route("/account", methods=["GET", "POST"])
 def account():
-    """Смена собственного пароля — для пользователей и администратора."""
+    """Смена собственного пароля. У пользователя форма — в его профиле, у администратора профиля нет."""
     user = current_user()
+    if not user["admin"] and request.method == "GET":
+        return redirect(url_for("user_profile", user_id=user["id"]))
     if request.method == "POST":
         conn = get_db()
         ip = client_ip()
@@ -389,6 +403,8 @@ def account():
                 >= LOGIN_MAX_FAILURES:
             conn.commit()
             flash(f"Слишком много неудачных попыток. Повторите через {LOGIN_WINDOW // 60} минут.", "danger")
+            if not user["admin"]:
+                return redirect(url_for("user_profile", user_id=user["id"]))
             return render_template("account.html", min_len=min_password_len(user["admin"])), 429
         if user["admin"]:
             old_hash = get_setting_safe("admin_password")
@@ -421,19 +437,22 @@ def account():
             app.logger.warning("password changed: user=%s ip=%s", user["username"], ip)
             flash("Пароль изменён. На других устройствах нужно будет войти заново.", "success")
             return redirect(url_for("account"))
+        if not user["admin"]:
+            return redirect(url_for("user_profile", user_id=user["id"]))
     return render_template("account.html", min_len=min_password_len(user["admin"]))
 
 
 @app.cli.command("add-user")
 @click.argument("username")
-@click.option("--name", "full_name", default="", help="ФИО или должность — для списка пользователей.")
+@click.option("--name", "full_name", default="", help="Имя (ФИО) — так пользователь показывается на сайте.")
+@click.option("--position", default="", help="Должность.")
 @click.password_option(prompt="Пароль пользователя")
-def add_user_command(username, full_name, password):
+def add_user_command(username, full_name, position, password):
     """Добавить пользователя с правом просмотра."""
     error = validate_new_user(username, password)
     if error:
         raise click.ClickException(error)
-    create_user(username, password, full_name)
+    create_user(username, password, full_name, position)
     click.echo(f"Готово. Пользователь {username} может входить для просмотра.")
 
 
@@ -1308,7 +1327,8 @@ SELECT t.*, a.num AS aud_num, c.num AS pc_num, ta.num AS t_aud_num,
        COALESCE(c.auditorium_id, t.auditorium_id) AS aud_id,
        (SELECT COUNT(*) FROM ticket_messages m WHERE m.ticket_id = t.id) AS msg_count,
        (SELECT COUNT(*) FROM ticket_watchers w WHERE w.ticket_id = t.id) AS watchers,
-       me.user_id IS NOT NULL AS watching, COALESCE(me.unread, 0) AS my_unread
+       me.user_id IS NOT NULL AS watching, COALESCE(me.unread, 0) AS my_unread,
+       (SELECT u.position FROM users u WHERE u.id = t.author_id) AS author_position
 FROM tickets t
 LEFT JOIN computers c ON c.id = t.computer_id
 LEFT JOIN auditoriums a ON a.id = c.auditorium_id

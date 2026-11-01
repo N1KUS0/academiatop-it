@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS sw_aliases (
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY,
     username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    full_name     TEXT NOT NULL DEFAULT '',
+    full_name     TEXT NOT NULL DEFAULT '',   -- отображаемое имя (ФИО); пусто — показывается логин
+    position      TEXT NOT NULL DEFAULT '',   -- должность, меняет только администратор
     password_hash TEXT NOT NULL,
     created_at    TEXT NOT NULL DEFAULT '',
     last_login    TEXT NOT NULL DEFAULT ''
@@ -206,6 +207,9 @@ def migrate(conn):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(installations)")}
     if "source" not in cols:
         conn.execute("ALTER TABLE installations ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    if "position" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN position TEXT NOT NULL DEFAULT ''")
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(tickets)")}
     if "auditorium_id" not in cols:
         conn.execute("ALTER TABLE tickets ADD COLUMN auditorium_id INTEGER "

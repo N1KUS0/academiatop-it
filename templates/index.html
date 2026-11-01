@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import cat_badge, ticket_badge, kind_badge %}
+{% from "macros.html" import cat_badge, ticket_badge, kind_badge, author_link %}
 {% block title %}Главная{% endblock %}
 {% block content %}
 {% set shown = open_tickets[:6] %}
@@ -22,7 +22,7 @@
       <td class="mono muted nowrap">№{{ t.id }}</td>
       <td><a href="{{ url_for('ticket', ticket_id=t.id) }}" class="strong">{{ t.title }}</a>
           {% if t.unread %}<span class="badge new-dot">новое</span>{% endif %}
-          <div class="muted small">{{ [t.pc_label, t.author_name or t.author_username]|select|join(' · ') }}{% if t.watchers > 1 %} · касается {{ t.watchers }}{% endif %}</div></td>
+          <div class="muted small">{% if t.pc_label %}{{ t.pc_label }} · {% endif %}{{ author_link(t) }}{% if t.watchers > 1 %} · касается {{ t.watchers }}{% endif %}</div></td>
       <td>{{ kind_badge(t.kind) }}</td>
       <td class="num">{{ ticket_badge(t.status) }}</td>
     </tr>

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import ticket_badge, kind_badge %}
+{% from "macros.html" import ticket_badge, kind_badge, author_link %}
 {% block title %}Заявки{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -51,7 +51,7 @@
         {% if t.msg_count %}<span class="muted small">· {{ t.msg_count }} сообщ.</span>{% endif %}</td>
     <td>{{ kind_badge(t.kind) }}</td>
     <td class="mono">{{ t.pc_label or '—' }}</td>
-    <td>{{ t.author_name or t.author_username }}{% if t.is_author %} <span class="muted small">(вы)</span>{% endif %}</td>
+    <td>{{ author_link(t) }}{% if t.is_author %} <span class="muted small">(вы)</span>{% endif %}</td>
     <td class="num">{{ t.watchers or '—' }}{% if t.watching and not t.is_author %} <span title="Вы отслеживаете">★</span>{% endif %}</td>
     <td>{{ ticket_badge(t.status) }}</td>
     <td class="nowrap small">{{ t.updated_at }}</td>

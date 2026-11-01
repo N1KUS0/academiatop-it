@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf, delete_button, ticket_badge, kind_badge %}
+{% block title %}{{ user.full_name or user.username }}{% endblock %}
+{% block content %}
+{% if is_admin %}<nav class="crumbs"><a href="{{ url_for('users_page') }}">Пользователи</a> / {{ user.username }}</nav>{% endif %}
+<h1>{{ user.full_name or user.username }}
+  {% if user.position %}<small class="muted">· {{ user.position }}</small>{% endif %}
+  {% if is_self %}<small class="muted">(это вы)</small>{% endif %}</h1>
+
+<dl class="card specs">
+  {% if is_admin or is_self %}<div><dt>Логин</dt><dd class="mono">{{ user.username }}</dd></div>{% endif %}
+  <div><dt>Должность</dt><dd>{{ user.position or '—' }}</dd></div>
+  {% if is_admin %}
+  <div><dt>Создан</dt><dd>{{ user.created_at | ru_date }}</dd></div>
+  <div><dt>Последний вход</dt><dd>{{ user.last_login or 'ещё не входил' }}</dd></div>
+  {% endif %}
+  <div><dt>Заявок</dt><dd>{{ tickets|length }}</dd></div>
+</dl>
+
+{% if is_admin %}
+<section class="card">
+  <h2>Профиль</h2>
+  <form method="post" action="{{ url_for('user_profile', user_id=user.id) }}" class="form-row">
+    {{ csrf() }}
+    <label>Логин <input type="text" name="username" value="{{ form.username }}" required maxlength="50" autocomplete="off"></label>
+    <label class="grow">Имя <input type="text" name="full_name" value="{{ form.full_name }}" maxlength="200"
+                                   placeholder="Иванов Иван Иванович"></label>
+    <label class="grow">Должность <input type="text" name="position" value="{{ form.position }}" maxlength="200"
+                                         placeholder="преподаватель"></label>
+    <button class="btn btn-primary">Сохранить</button>
+  </form>
+  <p class="muted small">Имя показывается в заявках и в меню; если его нет — показывается логин. При смене логина пользователь остаётся в системе, но входить дальше будет с новым логином — сообщите ему.</p>
+</section>
+
+<section class="card">
+  <h2>Пароль</h2>
+  <form method="post" action="{{ url_for('user_password', user_id=user.id) }}" class="form-row">
+    {{ csrf() }}
+    <input type="hidden" name="back" value="edit">
+    <label>Новый пароль <input type="text" name="password" required minlength="{{ min_len }}" autocomplete="new-password"
+                               placeholder="не короче {{ min_len }} символов"></label>
+    <button class="btn">Сменить пароль</button>
+  </form>
+  <p class="muted small">После смены пароля все открытые сессии пользователя закрываются.</p>
+</section>
+
+{% elif is_self %}
+<section class="card">
+  <h2>Имя</h2>
+  <form method="post" action="{{ url_for('user_profile', user_id=user.id) }}" class="form-row">
+    {{ csrf() }}
+    <label class="grow">Как вас показывать в заявках <input type="text" name="full_name" value="{{ form.full_name }}" maxlength="200"
+                                                          placeholder="Иванов Иван Иванович"></label>
+    <button class="btn btn-primary">Сохранить</button>
+  </form>
+  <p class="muted small">Логин и должность меняет администратор.</p>
+</section>
+
+<section class="card">
+  <h2>Смена пароля</h2>
+  <form method="post" action="{{ url_for('account') }}" class="form-row">
+    {{ csrf() }}
+    <label>Текущий пароль <input type="password" name="current" required autocomplete="current-password"></label>
+    <label>Новый пароль <input type="password" name="new" required minlength="{{ min_len }}" autocomplete="new-password"></label>
+    <label>Ещё раз <input type="password" name="confirm" required minlength="{{ min_len }}" autocomplete="new-password"></label>
+    <button class="btn">Сменить пароль</button>
+  </form>
+  <p class="muted small">Не короче {{ min_len }} символов. После смены на других устройствах нужно будет войти заново.</p>
+</section>
+{% endif %}
+
+<h2>{{ 'Мои заявки' if is_self else 'Заявки пользователя' }} <small class="muted">{{ tickets|length }}</small></h2>
+{% if tickets %}
+<div class="table-wrap">
+<table class="table">
+  <thead><tr><th>№</th><th>Тема</th><th>Тип</th><th>ПК / аудитория</th><th class="num" title="Скольких пользователей касается">Касается</th><th>Статус</th><th>Обновлена</th></tr></thead>
+  <tbody>
+  {% for t in tickets %}
+  <tr class="{{ 'unread' if t.unread }}">
+    <td class="mono">{{ t.id }}</td>
+    <td><a href="{{ url_for('ticket', ticket_id=t.id) }}" class="strong">{{ t.title }}</a>
+        {% if t.unread %}<span class="badge new-dot">новое</span>{% endif %}
+        {% if t.msg_count %}<span class="muted small">· {{ t.msg_count }} сообщ.</span>{% endif %}</td>
+    <td>{{ kind_badge(t.kind) }}</td>
+    <td class="mono">{{ t.pc_label or '—' }}</td>
+    <td class="num">{{ t.watchers or '—' }}</td>
+    <td>{{ ticket_badge(t.status) }}</td>
+    <td class="nowrap small">{{ t.updated_at }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty">Заявок нет.</div>
+{% endif %}
+
+{% if is_admin %}
+<div class="danger-zone">
+  {{ delete_button(url_for('user_delete', user_id=user.id), 'Удалить пользователя',
+     'Удалить пользователя ' ~ user.username ~ '? Его заявки сохранятся.') }}
+</div>
+{% endif %}
+{% endblock %}

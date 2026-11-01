@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import csrf, status_badge, cat_badge, lic_badge, delete_button %}
+{% from "macros.html" import csrf, status_badge, cat_badge, lic_badge, delete_button, author_link %}
 {% block title %}{{ pc.hostname }}{% endblock %}
 {% block content %}
 <nav class="crumbs">
@@ -24,7 +24,7 @@
   <ul>
     {% for t in open_tickets %}
     <li><a href="{{ url_for('ticket', ticket_id=t.id) }}">№{{ t.id }} {{ t.title }}</a>
-        <span class="muted small">{{ TICKET_STATUSES[t.status] }} · {{ t.author_name or t.author_username }}</span></li>
+        <span class="muted small">{{ TICKET_STATUSES[t.status] }} · {{ author_link(t) }}</span></li>
     {% endfor %}
   </ul>
 </div>

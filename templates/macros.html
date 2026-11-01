@@ -20,6 +20,13 @@
   <span class="badge kind-{{ kind }}">{{ TICKET_KINDS.get(kind, kind) }}</span>
 {%- endmacro %}
 
+{% macro author_link(t, position=False) -%}
+  {%- set name = t.author_name or t.author_username or 'администратор' -%}
+  {%- if t.author_id -%}<a href="{{ url_for('user_profile', user_id=t.author_id) }}">{{ name }}</a>
+  {%- else %}{{ name }}{% endif -%}
+  {%- if position and t.author_position %} <span class="muted small">· {{ t.author_position }}</span>{% endif -%}
+{%- endmacro %}
+
 {% macro delete_button(action, label, confirm_text, extra='') -%}
   <form method="post" action="{{ action }}" class="inline" data-confirm="{{ confirm_text }}">
     {{ csrf() }}{{ extra }}
