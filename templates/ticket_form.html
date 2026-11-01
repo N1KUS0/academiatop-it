@@ -13,7 +13,7 @@
     {% endfor %}
   </div>
 
-  <label>Аудитория <span class="muted small">если касается всей аудитории</span>
+  <label>Аудитория
     <select name="auditorium" id="ticket-aud">
       <option value="">— не указана —</option>
       {% for a in auditoriums %}{% set code = 'AUD-' ~ a.num %}
@@ -21,9 +21,26 @@
       {% endfor %}
     </select>
   </label>
-  <label>Компьютер <span class="muted small">необязательно, если проблема на одном ПК</span>
-    <input type="text" name="computer" list="pc-names" value="{{ form.computer }}" placeholder="PC-01-03" autocomplete="off">
-  </label>
+
+  <fieldset class="wide pc-picker" id="pc-picker">
+    <legend>Компьютеры <span class="muted small" id="pc-picker-hint">не отмечено ни одного — заявка на всю аудиторию</span></legend>
+    {% for a in auditoriums %}
+    <div class="pc-group" data-aud="AUD-{{ a.num }}">
+      <div class="pc-group-head small muted">AUD-{{ a.num }}
+        {%- set aud_pcs = computers|selectattr('aud_num', 'equalto', a.num)|list %}
+        {%- if aud_pcs|length > 1 %} · <button type="button" class="link-btn" data-pc-all>отметить все</button>{% endif %}</div>
+      {% for c in aud_pcs %}
+      <label class="check pc-chip{{ ' pc-off' if c.status != 'active' }}" title="{{ STATUSES.get(c.status, '') }}">
+        <input type="checkbox" name="pc" value="{{ c.hostname }}" {{ 'checked' if c.hostname in form.pcs }}>
+        <span class="mono">{{ c.hostname }}</span></label>
+      {% else %}
+      <span class="muted small">В аудитории нет компьютеров.</span>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    <p class="muted small pc-picker-empty">Сначала выберите аудиторию.</p>
+  </fieldset>
+
   <label class="wide" data-kind="install">Какую программу установить
     <input type="text" name="software" list="sw-names" value="{{ form.software }}" placeholder="название программы" autocomplete="off">
   </label>
@@ -46,7 +63,6 @@
     <button class="btn btn-primary">Отправить</button>
     <a class="btn btn-link" href="{{ url_for('tickets') }}">Отмена</a>
   </div>
-  <datalist id="pc-names">{% for c in computers %}<option value="{{ c.hostname }}" data-aud="{{ c.aud_code }}">{% endfor %}</datalist>
   <datalist id="sw-names">{% for n in sw_names %}<option value="{{ n }}">{% endfor %}</datalist>
 </form>
 {% endblock %}

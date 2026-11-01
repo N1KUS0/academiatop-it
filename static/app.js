@@ -47,32 +47,42 @@ document.querySelectorAll("[data-filter-table]").forEach(function (input) {
   form.addEventListener("change", function (e) { if (e.target.name === "kind") update(); });
   update();
 
-  // Аудитория и компьютер: в подсказках — только ПК выбранной аудитории,
-  // а по введённому имени ПК аудитория выбирается сама.
+  // Аудитория и компьютеры: видны галочки только выбранной аудитории.
+  // Ничего не отмечено — заявка на всю аудиторию, отмечено несколько — на эти ПК.
   var aud = document.getElementById("ticket-aud");
-  var pcList = document.getElementById("pc-names");
-  if (aud && pcList) {
-    var allPcs = Array.prototype.map.call(pcList.options, function (o) { return o.cloneNode(); });
-    var filterPcs = function () {
-      pcList.textContent = "";
-      allPcs.forEach(function (o) { if (!aud.value || o.dataset.aud === aud.value) pcList.appendChild(o); });
+  var picker = document.getElementById("pc-picker");
+  if (aud && picker) {
+    var hint = document.getElementById("pc-picker-hint");
+    var empty = picker.querySelector(".pc-picker-empty");
+    var groups = picker.querySelectorAll(".pc-group");
+    var countPcs = function (n) {
+      var m10 = n % 10, m100 = n % 100;
+      return n + (m10 === 1 && m100 !== 11 ? " компьютер" : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? " компьютера" : " компьютеров");
     };
-    var pcAud = function () {
-      var m = /^PC-(\d+)-\d+$/i.exec(form.elements.computer.value.trim());
-      return m && "AUD-" + parseInt(m[1], 10);
+    var refreshPcs = function () {
+      var n = picker.querySelectorAll('input[name="pc"]:checked').length;
+      hint.textContent = !aud.value ? "" : n === 0 ? "не отмечено ни одного — заявка на всю аудиторию"
+        : "отмечено: " + countPcs(n);
     };
-    aud.addEventListener("change", function () {
-      if (aud.value && pcAud() && pcAud() !== aud.value) form.elements.computer.value = "";
-      filterPcs();
+    var showGroup = function () {
+      groups.forEach(function (g) {
+        var on = g.dataset.aud === aud.value;
+        g.hidden = !on;
+        if (!on) g.querySelectorAll('input[name="pc"]').forEach(function (b) { b.checked = false; });
+      });
+      empty.hidden = !!aud.value;
+      refreshPcs();
+    };
+    aud.addEventListener("change", showGroup);
+    picker.addEventListener("change", refreshPcs);
+    picker.addEventListener("click", function (e) {
+      if (!e.target.matches("[data-pc-all]")) return;
+      var boxes = e.target.closest(".pc-group").querySelectorAll('input[name="pc"]');
+      var all = Array.prototype.every.call(boxes, function (b) { return b.checked; });
+      boxes.forEach(function (b) { b.checked = !all; });
+      picker.dispatchEvent(new Event("change", { bubbles: true }));  // счётчик и похожие заявки
     });
-    form.elements.computer.addEventListener("input", function () {
-      var code = pcAud();
-      if (code && code !== aud.value && aud.querySelector('option[value="' + code + '"]')) {
-        aud.value = code;
-        filterPcs();
-      }
-    });
-    filterPcs();
+    showGroup();
   }
 
   // Похожие открытые заявки — чтобы не создавать дубли
@@ -84,7 +94,9 @@ document.querySelectorAll("[data-filter-table]").forEach(function (input) {
   function check() {
     var install = (form.querySelector('input[name="kind"]:checked') || {}).value === "install";
     var params = new URLSearchParams({
-      computer: field("computer"), auditorium: field("auditorium"), title: field("title"),
+      pcs: Array.prototype.map.call(form.querySelectorAll('input[name="pc"]:checked'),
+                                    function (b) { return b.value; }).join(","),
+      auditorium: field("auditorium"), title: field("title"),
       software: install ? field("software") : ""
     });
     var query = params.toString();

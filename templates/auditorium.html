@@ -21,7 +21,7 @@
   <ul>
     {% for t in open_tickets %}
     <li><a href="{{ url_for('ticket', ticket_id=t.id) }}">№{{ t.id }} {{ t.title }}</a>
-        <span class="muted small">{{ t.pc_link or 'вся аудитория' }} · {{ TICKET_STATUSES[t.status] }} · {{ author_link(t) }}</span></li>
+        <span class="muted small">{{ t.pc_link or (t.pc_label if t.pcs else 'вся аудитория') }} · {{ TICKET_STATUSES[t.status] }} · {{ author_link(t) }}</span></li>
     {% endfor %}
   </ul>
 </div>

@@ -12,6 +12,10 @@
   <div><dt>Тип</dt><dd>{{ kind_badge(t.kind) }}</dd></div>
   <div><dt>Где</dt><dd>
     {% if t.pc_link %}<a class="mono" href="{{ url_for('computer', hostname=t.pc_link) }}">{{ t.pc_link }}</a>
+    {% elif pc_rows %}
+      {% for p in pc_rows %}{% if p.exists %}<a class="mono" href="{{ url_for('computer', hostname=p.hostname) }}">{{ p.hostname }}</a>
+        {%- else %}<span class="mono" title="компьютер удалён">{{ p.hostname }}</span>{% endif %}{{ ', ' if not loop.last }}{% endfor %}
+      <div class="muted small">{{ pc_rows|length }} ПК{% if t.aud_link %} в <a href="{{ url_for('auditorium', code=t.aud_link) }}">{{ t.aud_link }}</a>{% endif %}</div>
     {% elif t.aud_link %}<a class="mono" href="{{ url_for('auditorium', code=t.aud_link) }}">{{ t.aud_link }}</a>
       <span class="muted small">вся аудитория</span>
     {% elif t.hostname %}<span class="mono">{{ t.hostname }}</span> <span class="muted small">({{ 'удалена' if t.hostname.startswith('AUD-') else 'удалён' }})</span>
@@ -81,7 +85,7 @@
 </div>
 
 {% if not can_write %}
-<p class="muted">Заявка закрыта. Если проблема повторилась — <a href="{{ url_for('ticket_new', kind=t.kind, computer=t.pc_link or '', auditorium=t.aud_link or '') }}">создайте новую заявку</a>.</p>
+<p class="muted">Заявка закрыта. Если проблема повторилась — <a href="{{ url_for('ticket_new', kind=t.kind, computer=t.pc_link or '', auditorium=t.aud_link or '', pc=t.pcs) }}">создайте новую заявку</a>.</p>
 {% else %}
 <form method="post" action="{{ url_for('ticket_reply', ticket_id=t.id) }}" class="card stack reply-form">
   {{ csrf() }}

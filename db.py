@@ -111,6 +111,16 @@ CREATE TABLE IF NOT EXISTS tickets (
 );
 CREATE INDEX IF NOT EXISTS tickets_author ON tickets (author_id);
 
+-- Заявка на несколько ПК одной аудитории (tickets.auditorium_id — их аудитория).
+-- На один ПК — tickets.computer_id, на всю аудиторию — только tickets.auditorium_id.
+CREATE TABLE IF NOT EXISTS ticket_computers (
+    ticket_id   INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    computer_id INTEGER REFERENCES computers(id) ON DELETE SET NULL,
+    hostname    TEXT NOT NULL DEFAULT '',      -- имя ПК на момент создания (если ПК удалят)
+    PRIMARY KEY (ticket_id, hostname)
+);
+CREATE INDEX IF NOT EXISTS ticket_computers_pc ON ticket_computers (computer_id);
+
 CREATE TABLE IF NOT EXISTS ticket_messages (
     id          INTEGER PRIMARY KEY,
     ticket_id   INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,

@@ -331,3 +331,18 @@ form.inline { display: inline; margin: 0; }
 .profile-head { display: flex; align-items: center; gap: 18px; margin-bottom: 14px; }
 .profile-head h1 { margin: 0; }
 .avatar-form { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- выбор компьютеров в заявке ---------- */
+.pc-picker { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px 12px; margin: 0; min-width: 0; }
+.pc-picker legend { font-size: 13px; font-weight: 600; padding: 0 6px; }
+.pc-picker legend .muted { font-weight: 400; margin-left: 6px; }
+.pc-group { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.pc-group + .pc-group { margin-top: 10px; }
+.pc-group-head { width: 100%; }
+.pc-chip { border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; cursor: pointer; background: var(--card); }
+.pc-chip:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.pc-chip input { accent-color: var(--accent); margin: 0; }
+.pc-off { opacity: .6; }
+.pc-picker-empty { margin: 0; }
+.link-btn { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-dark); cursor: pointer; }
+.link-btn:hover { text-decoration: underline; }

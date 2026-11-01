@@ -835,8 +835,9 @@ def computer(hostname):
            FROM installations i JOIN software s ON s.id = i.software_id
            WHERE i.computer_id = ? ORDER BY s.category, s.name""", (pc["id"],)).fetchall()
     open_tickets = get_db().execute(
-        "SELECT * FROM tickets WHERE computer_id = ? AND status IN (%s) ORDER BY id DESC"
-        % ",".join("?" * len(TICKET_OPEN)), (pc["id"], *TICKET_OPEN)).fetchall()
+        "SELECT * FROM tickets WHERE (computer_id = ? OR id IN "
+        "(SELECT ticket_id FROM ticket_computers WHERE computer_id = ?)) AND status IN (%s) ORDER BY id DESC"
+        % ",".join("?" * len(TICKET_OPEN)), (pc["id"], pc["id"], *TICKET_OPEN)).fetchall()
     return render_template("computer.html", pc=pc, installs=installs, sw_names=software_names(),
                            open_tickets=open_tickets)
 
@@ -1199,7 +1200,7 @@ def export(kind, fmt):
 
 
 BACKUP_TABLES = ["auditoriums", "computers", "software", "installations", "sw_aliases",
-                 "tickets", "ticket_messages", "ticket_watchers"]
+                 "tickets", "ticket_computers", "ticket_messages", "ticket_watchers"]
 
 
 @app.route("/data")
@@ -1413,16 +1414,26 @@ def set_import_token_command():
 # --------------------------------------------------------------------------- заявки
 
 TICKET_BODY_MAX = 5000
+MAX_TICKET_PCS = 100  # компьютеров в одной заявке
 
 
 def now_str():
     return time.strftime("%Y-%m-%d %H:%M")
 
 
-# Общая часть запросов к заявкам: текущее имя ПК, число «следящих» и признаки для текущего пользователя.
+# Общая часть запросов к заявкам: текущее имя ПК (или список ПК), число «следящих»
+# и признаки для текущего пользователя.
 TICKETS_SQL = """
 SELECT t.*, a.num AS aud_num, c.num AS pc_num, ta.num AS t_aud_num,
        COALESCE(c.auditorium_id, t.auditorium_id) AS aud_id,
+       (SELECT group_concat(CASE WHEN tc_c.id IS NULL THEN tc.hostname
+                                 ELSE printf('PC-%02d-%02d', tc_a.num, tc_c.num) END, ' ')
+          FROM ticket_computers tc
+          LEFT JOIN computers tc_c ON tc_c.id = tc.computer_id
+          LEFT JOIN auditoriums tc_a ON tc_a.id = tc_c.auditorium_id
+         WHERE tc.ticket_id = t.id) AS pc_list,
+       (SELECT group_concat(tc.computer_id, ' ') FROM ticket_computers tc
+         WHERE tc.ticket_id = t.id AND tc.computer_id IS NOT NULL) AS pc_ids,
        (SELECT COUNT(*) FROM ticket_messages m WHERE m.ticket_id = t.id) AS msg_count,
        (SELECT COUNT(*) FROM ticket_watchers w WHERE w.ticket_id = t.id) AS watchers,
        me.user_id IS NOT NULL AS watching, COALESCE(me.unread, 0) AS my_unread,
@@ -1448,7 +1459,14 @@ def ticket_dict(row):
     # Если ПК переименовали (перенесли) — показываем актуальное имя, если удалили — сохранённое.
     t["pc_link"] = pc_hostname(t["aud_num"], t["pc_num"]) if t["pc_num"] else None
     t["aud_link"] = aud_code(t["t_aud_num"]) if t["t_aud_num"] else None
-    t["pc_label"] = t["pc_link"] or t["aud_link"] or t["hostname"]
+    # Заявка на несколько ПК: их имена (по порядку) и id тех, что ещё не удалены.
+    t["pcs"] = sorted((t["pc_list"] or "").split())
+    t["pc_id_set"] = {int(x) for x in (t["pc_ids"] or "").split()}
+    if t["pcs"]:
+        t["pc_label"] = ", ".join(t["pcs"]) if len(t["pcs"]) <= 3 else \
+            f"{t['aud_link'] or t['hostname']}: {len(t['pcs'])} ПК"
+    else:
+        t["pc_label"] = t["pc_link"] or t["aud_link"] or t["hostname"]
     t["is_open"] = t["status"] in TICKET_OPEN
     user = current_user()
     t["is_author"] = bool(user and t["author_id"] is not None and t["author_id"] == user["id"])
@@ -1487,14 +1505,15 @@ def tg_ticket_text(icon, t, who, body):
     return "\n".join(lines)
 
 
-def similar_tickets(computer_id=None, software="", title="", exclude=None, limit=5, auditorium_id=None):
-    """Открытые заявки, похожие на новую: тот же ПК или аудитория, та же программа, общие слова в теме."""
+def similar_tickets(computer_ids=(), software="", title="", exclude=None, limit=5, auditorium_id=None):
+    """Открытые заявки, похожие на новую: те же ПК или аудитория, та же программа, общие слова в теме."""
     def stems(text):
         return {w[:5] for w in "".join(ch if ch.isalnum() else " " for ch in text.lower()).split() if len(w) >= 4}
     conn = get_db()
+    computer_ids = set(computer_ids)
     aud_id = auditorium_id
-    if computer_id:
-        row = conn.execute("SELECT auditorium_id FROM computers WHERE id = ?", (computer_id,)).fetchone()
+    if computer_ids:
+        row = conn.execute("SELECT auditorium_id FROM computers WHERE id = ?", (min(computer_ids),)).fetchone()
         aud_id = row and row[0]
     rows = conn.execute(TICKETS_SQL + " WHERE t.status IN (%s)" % ",".join("?" * len(TICKET_OPEN)),
                         (current_user()["id"], *TICKET_OPEN)).fetchall()
@@ -1504,9 +1523,11 @@ def similar_tickets(computer_id=None, software="", title="", exclude=None, limit
         if r["id"] == exclude:
             continue
         score = 0
-        if computer_id and r["computer_id"] == computer_id:
-            score += 3
-        elif not computer_id and aud_id and not r["computer_id"] and r["auditorium_id"] == aud_id:
+        r_pcs = {int(x) for x in (r["pc_ids"] or "").split()} | ({r["computer_id"]} if r["computer_id"] else set())
+        if computer_ids & r_pcs:
+            score += 3  # общие компьютеры
+        elif not computer_ids and aud_id and not r["computer_id"] and not r["pc_list"] \
+                and r["auditorium_id"] == aud_id:
             score += 3  # обе заявки — на всю аудиторию
         elif aud_id and r["aud_id"] == aud_id:
             score += 1
@@ -1532,9 +1553,11 @@ def find_auditorium(code):
 
 
 def install_targets(t):
-    """Компьютеры, на которые ставится программа по заявке: один ПК или все рабочие ПК аудитории."""
+    """Компьютеры, на которые ставится программа по заявке: один ПК, выбранные ПК или все рабочие ПК аудитории."""
     if t["computer_id"]:
         return [t["computer_id"]]
+    if t["pcs"]:
+        return sorted(t["pc_id_set"])
     if t["auditorium_id"]:
         return [r[0] for r in get_db().execute(
             "SELECT id FROM computers WHERE auditorium_id = ? AND status != 'decommissioned' ORDER BY num",
@@ -1544,9 +1567,9 @@ def install_targets(t):
 
 @app.route("/tickets/similar")
 def tickets_similar():
-    computer = find_computer(request.args.get("computer", "").strip())
+    pcs = [find_computer(h.strip()) for h in request.args.get("pcs", "").split(",")[:MAX_TICKET_PCS]]
     aud = find_auditorium(request.args.get("auditorium", "").strip())
-    found = similar_tickets(computer["id"] if computer else None, request.args.get("software", "")[:200],
+    found = similar_tickets([c["id"] for c in pcs if c], request.args.get("software", "")[:200],
                             request.args.get("title", "")[:200], auditorium_id=aud["id"] if aud else None)
     return {"tickets": [dict(id=t["id"], title=t["title"], status=TICKET_STATUSES[t["status"]],
                              pc=t["pc_label"], watchers=t["watchers"], watching=bool(t["watching"]),
@@ -1582,23 +1605,32 @@ def tickets():
 def ticket_new():
     user = current_user()
     conn = get_db()
-    form = dict(kind=request.values.get("kind", "problem"), computer=request.values.get("computer", ""),
-                auditorium=request.values.get("auditorium", ""),
+    # ПК отмечаются галочками (pc); со страницы компьютера приходит ?computer=PC-.. — он сразу отмечен.
+    pcs = request.values.getlist("pc") or [request.values.get("computer", "")]
+    pcs = list(dict.fromkeys(h.strip().upper() for h in pcs if h.strip()))[:MAX_TICKET_PCS]
+    auditorium = request.values.get("auditorium", "")
+    if not auditorium and pcs and parse_hostname(pcs[0]):
+        auditorium = aud_code(parse_hostname(pcs[0])[0])
+    form = dict(kind=request.values.get("kind", "problem"), pcs=pcs, auditorium=auditorium,
                 software=request.values.get("software", ""), title="", body="")
     if request.method == "POST":
         form.update(title=form_str("title"), body=request.form.get("body", "").strip()[:TICKET_BODY_MAX],
-                    software=form_str("software"), computer=form_str("computer", 20),
-                    auditorium=form_str("auditorium", 20))
-        computer = find_computer(form["computer"])
+                    software=form_str("software"), auditorium=form_str("auditorium", 20))
+        computers = [find_computer(h) for h in pcs]
+        missing = [h for h, c in zip(pcs, computers) if not c]
         aud = find_auditorium(form["auditorium"])
+        if not aud and computers and not missing:
+            aud = conn.execute("SELECT * FROM auditoriums WHERE id = ?", (computers[0]["auditorium_id"],)).fetchone()
         if form["kind"] not in TICKET_KINDS:
             flash("Выберите тип заявки.", "danger")
-        elif form["computer"] and not computer:
-            flash(f"Компьютер {form['computer']} не найден.", "danger")
+        elif missing:
+            flash(f"Компьютер {missing[0]} не найден.", "danger")
         elif form["auditorium"] and not aud:
             flash(f"Аудитория {form['auditorium']} не найдена.", "danger")
-        elif computer and aud and computer["auditorium_id"] != aud["id"]:
-            flash(f"Компьютер {form['computer'].upper()} не в аудитории {aud_code(aud['num'])}.", "danger")
+        elif any(c["auditorium_id"] != aud["id"] for c in computers):
+            other = next(h for h, c in zip(pcs, computers) if c["auditorium_id"] != aud["id"])
+            flash(f"Компьютер {other} не в аудитории {aud_code(aud['num'])}. "
+                  "В одной заявке — компьютеры одной аудитории.", "danger")
         elif form["kind"] == "install" and not form["software"]:
             flash("Укажите, какую программу установить.", "danger")
         elif form["kind"] == "problem" and not form["title"]:
@@ -1607,15 +1639,20 @@ def ticket_new():
             if not form["title"]:
                 form["title"] = f"Установить {form['software']}"
             stamp = now_str()
+            # Один ПК — computer_id; несколько — аудитория + ticket_computers; ни одного — вся аудитория.
+            single = computers[0] if len(computers) == 1 else None
             cur = conn.execute(
                 """INSERT INTO tickets (kind, title, computer_id, auditorium_id, hostname, software_name, author_id,
                                         author_username, author_name, created_at, updated_at, admin_unread)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (form["kind"], form["title"], computer["id"] if computer else None,
-                 aud["id"] if aud and not computer else None,
-                 form["computer"].upper() if computer else aud_code(aud["num"]) if aud else "",
+                (form["kind"], form["title"], single["id"] if single else None,
+                 aud["id"] if aud and not single else None,
+                 pcs[0] if single else aud_code(aud["num"]) if aud else "",
                  form["software"] if form["kind"] == "install" else "",
                  user["id"], user["username"], user["name"], stamp, stamp, 0 if user["admin"] else 1))
+            if len(computers) > 1:
+                conn.executemany("INSERT INTO ticket_computers (ticket_id, computer_id, hostname) VALUES (?, ?, ?)",
+                                 [(cur.lastrowid, c["id"], h) for h, c in zip(pcs, computers)])
             if form["body"]:
                 conn.execute("INSERT INTO ticket_messages (ticket_id, author_name, is_admin, body, created_at) "
                              "VALUES (?, ?, ?, ?, ?)", (cur.lastrowid, user["name"], int(user["admin"]),
@@ -1655,9 +1692,12 @@ def ticket(ticket_id):
                WHERE s.name = ? AND i.computer_id IN (%s)""" % ",".join("?" * len(targets)),
             (t["software_name"], *targets)).fetchone()[0]
         missing = len(targets) - have
-    similar = similar_tickets(t["computer_id"], t["software_name"], t["title"], exclude=t["id"], limit=3,
+    similar = similar_tickets(install_targets(t) if t["computer_id"] or t["pcs"] else (), t["software_name"],
+                              t["title"], exclude=t["id"], limit=3,
                               auditorium_id=t["auditorium_id"]) if t["is_open"] else []
-    return render_template("ticket.html", t=t, messages=messages, similar=similar,
+    # Список ПК заявки: ссылки только на существующие компьютеры.
+    pc_rows = [dict(hostname=h, exists=bool(find_computer(h))) for h in t["pcs"]]
+    return render_template("ticket.html", t=t, messages=messages, similar=similar, pc_rows=pc_rows,
                            install_total=len(targets), install_missing=missing,
                            can_write=t["is_open"] or current_user()["admin"] or bool(t["watching"]))
 
@@ -1710,7 +1750,7 @@ def ticket_install(ticket_id):
     version, today = form_str("version", 50), date.today().isoformat()
     conn.executemany("INSERT OR IGNORE INTO installations (computer_id, software_id, version, installed_at) "
                      "VALUES (?, ?, ?, ?)", [(pc_id, sw_id, version, today) for pc_id in targets])
-    where = t["pc_label"] if t["computer_id"] else f"{t['pc_label']} ({len(targets)} ПК)"
+    where = t["pc_label"] if t["computer_id"] or 1 < len(t["pcs"]) <= 3 else f"{t['pc_label']} ({len(targets)} ПК)"
     stamp = now_str()
     conn.execute("INSERT INTO ticket_messages (ticket_id, author_name, is_admin, body, status, created_at) "
                  "VALUES (?, ?, 1, ?, 'done', ?)",
