@@ -1,21 +1,42 @@
 {% extends "base.html" %}
-{% from "macros.html" import csrf, delete_button, ticket_badge, kind_badge %}
+{% from "macros.html" import csrf, delete_button, ticket_badge, kind_badge, avatar %}
 {% block title %}{{ user.full_name or user.username }}{% endblock %}
 {% block content %}
 {% if is_admin %}<nav class="crumbs"><a href="{{ url_for('users_page') }}">Пользователи</a> / {{ user.username }}</nav>{% endif %}
-<h1>{{ user.full_name or user.username }}
-  {% if user.position %}<small class="muted">· {{ user.position }}</small>{% endif %}
-  {% if is_self %}<small class="muted">(это вы)</small>{% endif %}</h1>
+<div class="profile-head">
+  {{ avatar(user.id, user.avatar, user.full_name or user.username, 96) }}
+  <div>
+    <h1>{{ user.full_name or user.username }} {% if is_self %}<small class="muted">(это вы)</small>{% endif %}</h1>
+    {% if is_admin or is_self %}<div class="muted small">логин <span class="mono">{{ user.username }}</span></div>{% endif %}
+  </div>
+</div>
 
+{% if is_admin %}
 <dl class="card specs">
-  {% if is_admin or is_self %}<div><dt>Логин</dt><dd class="mono">{{ user.username }}</dd></div>{% endif %}
-  <div><dt>Должность</dt><dd>{{ user.position or '—' }}</dd></div>
-  {% if is_admin %}
   <div><dt>Создан</dt><dd>{{ user.created_at | ru_date }}</dd></div>
   <div><dt>Последний вход</dt><dd>{{ user.last_login or 'ещё не входил' }}</dd></div>
-  {% endif %}
   <div><dt>Заявок</dt><dd>{{ tickets|length }}</dd></div>
 </dl>
+{% endif %}
+
+{% if is_admin or is_self %}
+<section class="card">
+  <h2>Аватарка</h2>
+  <div class="avatar-form">
+    <form method="post" action="{{ url_for('user_avatar_upload', user_id=user.id) }}" enctype="multipart/form-data" class="avatar-form">
+      {{ csrf() }}
+      <input type="file" name="avatar" accept="image/jpeg,image/png,image/webp,image/gif" required>
+      <button class="btn btn-primary">{{ 'Заменить' if user.avatar else 'Загрузить' }}</button>
+    </form>
+    {% if user.avatar %}
+    <form method="post" action="{{ url_for('user_avatar_delete', user_id=user.id) }}" class="inline" data-confirm="Удалить аватарку?">
+      {{ csrf() }}<button class="btn btn-link">Удалить</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="muted small">JPG, PNG, WEBP или GIF до 10 МБ. Фото обрежется до квадрата по центру и уменьшится; данные о месте съёмки не сохраняются.</p>
+</section>
+{% endif %}
 
 {% if is_admin %}
 <section class="card">
@@ -25,8 +46,6 @@
     <label>Логин <input type="text" name="username" value="{{ form.username }}" required maxlength="50" autocomplete="off"></label>
     <label class="grow">Имя <input type="text" name="full_name" value="{{ form.full_name }}" maxlength="200"
                                    placeholder="Иванов Иван Иванович"></label>
-    <label class="grow">Должность <input type="text" name="position" value="{{ form.position }}" maxlength="200"
-                                         placeholder="преподаватель"></label>
     <button class="btn btn-primary">Сохранить</button>
   </form>
   <p class="muted small">Имя показывается в заявках и в меню; если его нет — показывается логин. При смене логина пользователь остаётся в системе, но входить дальше будет с новым логином — сообщите ему.</p>
@@ -53,7 +72,7 @@
                                                           placeholder="Иванов Иван Иванович"></label>
     <button class="btn btn-primary">Сохранить</button>
   </form>
-  <p class="muted small">Логин и должность меняет администратор.</p>
+  <p class="muted small">Логин меняет администратор.</p>
 </section>
 
 <section class="card">

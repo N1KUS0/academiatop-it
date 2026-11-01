@@ -1,4 +1,4 @@
-<!doctype html>
+{% from "macros.html" import avatar %}<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
@@ -32,7 +32,9 @@
         <a href="{{ url_for('users_page') }}" class="{{ 'on' if ep.startswith('user') }}">Пользователи</a>
       {% endif %}
       <a href="{{ url_for('account') }}" class="{{ 'on' if ep == 'account' or (ep == 'user_profile' and request.view_args.user_id == current_user.id) }}"
-         title="{{ 'Сменить пароль' if is_admin else 'Мой профиль: имя, пароль, мои заявки' }}">{{ current_user.username }}</a>
+         title="{{ 'Сменить пароль' if is_admin else 'Мой профиль: имя, аватарка, пароль, мои заявки' }}">
+        {%- if not is_admin %}<span class="nav-user">{{ avatar(current_user.id, current_user.avatar, current_user.name, 24) }}{{ current_user.username }}</span>
+        {%- else %}{{ current_user.username }}{% endif %}</a>
       <form method="post" action="{{ url_for('logout') }}" class="nav-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="nav-btn" title="Вы вошли как {{ current_user.username }}">Выйти</button>

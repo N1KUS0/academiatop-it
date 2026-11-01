@@ -1,4 +1,4 @@
-"""Реестр ПО — Академия ТОП."""
+"""Академия ТОП — IT-портал: компьютеры, ПО, заявки."""
 import csv
 import hashlib
 import io
@@ -86,19 +86,23 @@ def password_marker(pw_hash=None):
     return (get_setting_safe("admin_password") if pw_hash is None else pw_hash)[-16:]
 
 
+# Пользователь вместе с версией аватарки (NULL — аватарки нет).
+USERS_SQL = "SELECT u.*, av.version AS avatar FROM users u LEFT JOIN user_avatars av ON av.user_id = u.id"
+
+
 def current_user():
     """Вошедший пользователь: dict(id, username, name, admin) или None."""
     if "_user" not in g:
         g._user = None
         if session.get("admin") is True and session.get("pwm") == password_marker():
             g._user = dict(id=None, username=get_setting_safe("admin_user"),
-                           name="Администратор", admin=True)
+                           name="Администратор", admin=True, avatar=None)
         elif session.get("uid"):
-            row = get_db().execute("SELECT * FROM users WHERE id = ?", (session["uid"],)).fetchone()
+            row = get_db().execute(USERS_SQL + " WHERE u.id = ?", (session["uid"],)).fetchone()
             # Удалённый пользователь или сменённый пароль — сессия больше не действует.
             if row and session.get("pwm") == password_marker(row["password_hash"]):
                 g._user = dict(id=row["id"], username=row["username"],
-                               name=row["full_name"] or row["username"], admin=False)
+                               name=row["full_name"] or row["username"], admin=False, avatar=row["avatar"])
     return g._user
 
 
@@ -273,11 +277,10 @@ def validate_password(password, admin=False):
     return None
 
 
-def create_user(username, password, full_name="", position=""):
+def create_user(username, password, full_name=""):
     conn = get_db()
-    conn.execute("INSERT INTO users (username, full_name, position, password_hash, created_at) "
-                 "VALUES (?, ?, ?, ?, ?)",
-                 (username, full_name, position, generate_password_hash(password), date.today().isoformat()))
+    conn.execute("INSERT INTO users (username, full_name, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                 (username, full_name, generate_password_hash(password), date.today().isoformat()))
     conn.commit()
 
 
@@ -293,8 +296,9 @@ def delete_user(conn, user_id):
 @admin_required
 def users_page():
     users = get_db().execute(
-        """SELECT u.*, (SELECT COUNT(*) FROM tickets t WHERE t.author_id = u.id) AS tickets
-           FROM users u ORDER BY u.username COLLATE NOCASE""").fetchall()
+        """SELECT u.*, av.version AS avatar, (SELECT COUNT(*) FROM tickets t WHERE t.author_id = u.id) AS tickets
+           FROM users u LEFT JOIN user_avatars av ON av.user_id = u.id
+           ORDER BY u.username COLLATE NOCASE""").fetchall()
     return render_template("users.html", users=users, min_len=MIN_PASSWORD_LEN)
 
 
@@ -306,40 +310,125 @@ def user_new():
     if error:
         flash(error, "danger")
     else:
-        create_user(username, password, form_str("full_name"), form_str("position"))
+        create_user(username, password, form_str("full_name"))
         app.logger.warning("user created: %s", username)
         flash(f"Пользователь «{username}» создан. Передайте ему логин и пароль.", "success")
     return redirect(url_for("users_page"))
 
 
 def get_user_or_404(user_id):
-    row = get_db().execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    row = get_db().execute(USERS_SQL + " WHERE u.id = ?", (user_id,)).fetchone()
     if not row:
         abort(404)
     return row
 
 
+def check_profile_access(user_id):
+    """Менять профиль может администратор или сам пользователь."""
+    me = current_user()
+    if not (me["admin"] or me["id"] == user_id):
+        abort(403)
+
+
+AVATAR_SIZE = 256                    # сторона квадрата, px
+AVATAR_MAX_BYTES = 10 * 1024 * 1024  # исходный файл; фото с телефона обычно 2–6 МБ
+AVATAR_MAX_PIXELS = 50_000_000       # защита от «бомб»: маленький файл, огромная картинка
+
+
+def make_avatar(data):
+    """Байты загруженной картинки -> квадратный JPEG AVATAR_SIZE px.
+    Картинка пересохраняется заново, поэтому метаданные фото (в том числе GPS) не сохраняются.
+    ValueError — если это не картинка."""
+    import warnings
+    from PIL import Image, ImageOps  # Pillow нужен только здесь
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            img = Image.open(io.BytesIO(data))
+            if img.width * img.height > AVATAR_MAX_PIXELS:
+                raise ValueError("слишком большое разрешение")
+            img = ImageOps.exif_transpose(img)  # фото с телефона — повернуть как снято
+            if img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info):
+                img = img.convert("RGBA")
+                bg = Image.new("RGB", img.size, "white")
+                bg.paste(img, mask=img.getchannel("A"))
+                img = bg
+            else:
+                img = img.convert("RGB")
+            img = ImageOps.fit(img, (AVATAR_SIZE, AVATAR_SIZE), Image.LANCZOS)
+            out = io.BytesIO()
+            img.save(out, "JPEG", quality=88, optimize=True)
+            return out.getvalue()
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as e:
+        raise ValueError(str(e)) from e
+
+
+@app.route("/users/<int:user_id>/avatar")
+def user_avatar(user_id):
+    row = get_db().execute("SELECT image FROM user_avatars WHERE user_id = ?", (user_id,)).fetchone()
+    if not row:
+        abort(404)
+    resp = Response(row["image"], mimetype="image/jpeg")
+    # В ссылке есть версия (?v=), поэтому картинку можно надолго оставить в кэше браузера.
+    resp.headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    return resp
+
+
+@app.route("/users/<int:user_id>/avatar", methods=["POST"])
+def user_avatar_upload(user_id):
+    check_profile_access(user_id)
+    get_user_or_404(user_id)
+    file = request.files.get("avatar")
+    data = file.read(AVATAR_MAX_BYTES + 1) if file and file.filename else b""
+    if not data:
+        flash("Выберите файл с фотографией.", "danger")
+    elif len(data) > AVATAR_MAX_BYTES:
+        flash(f"Файл больше {AVATAR_MAX_BYTES // 1024 // 1024} МБ — выберите фото поменьше.", "danger")
+    else:
+        try:
+            image = make_avatar(data)
+        except ValueError as e:
+            app.logger.warning("avatar rejected: user_id=%s: %s", user_id, e)
+            flash("Не получилось открыть файл как картинку. Подойдут JPG, PNG, WEBP или GIF.", "danger")
+        else:
+            conn = get_db()
+            conn.execute("INSERT OR REPLACE INTO user_avatars (user_id, image, version) VALUES (?, ?, ?)",
+                         (user_id, image, secrets.token_hex(6)))
+            conn.commit()
+            flash("Аватарка обновлена.", "success")
+    return redirect(url_for("user_profile", user_id=user_id))
+
+
+@app.route("/users/<int:user_id>/avatar/delete", methods=["POST"])
+def user_avatar_delete(user_id):
+    check_profile_access(user_id)
+    conn = get_db()
+    conn.execute("DELETE FROM user_avatars WHERE user_id = ?", (user_id,))
+    conn.commit()
+    flash("Аватарка удалена.", "info")
+    return redirect(url_for("user_profile", user_id=user_id))
+
+
 @app.route("/users/<int:user_id>", methods=["GET", "POST"])
 def user_profile(user_id):
     """Профиль пользователя. Смотреть могут все вошедшие (заявки и так видны всем).
-    Администратор меняет логин, имя и должность, сам пользователь — только своё имя."""
+    Администратор меняет логин и имя, сам пользователь — только своё имя."""
     user = get_user_or_404(user_id)
     me = current_user()
     is_self = me["id"] == user_id
-    form = dict(username=user["username"], full_name=user["full_name"], position=user["position"])
+    form = dict(username=user["username"], full_name=user["full_name"])
     if request.method == "POST":
-        if not (me["admin"] or is_self):
-            abort(403)
+        check_profile_access(user_id)
         form["full_name"] = form_str("full_name")
         if me["admin"]:
-            form.update(username=form_str("username", 60), position=form_str("position"))
+            form["username"] = form_str("username", 60)
         error = validate_username(form["username"], user_id)
         if error:
             flash(error, "danger")
         else:
             conn = get_db()
-            conn.execute("UPDATE users SET username = ?, full_name = ?, position = ? WHERE id = ?",
-                         (form["username"], form["full_name"], form["position"], user_id))
+            conn.execute("UPDATE users SET username = ?, full_name = ? WHERE id = ?",
+                         (form["username"], form["full_name"], user_id))
             # Автор в заявках показывается по профилю; в переписке остаются имена на момент сообщения.
             conn.execute("UPDATE tickets SET author_username = ?, author_name = ? WHERE author_id = ?",
                          (form["username"], form["full_name"] or form["username"], user_id))
@@ -445,14 +534,13 @@ def account():
 @app.cli.command("add-user")
 @click.argument("username")
 @click.option("--name", "full_name", default="", help="Имя (ФИО) — так пользователь показывается на сайте.")
-@click.option("--position", default="", help="Должность.")
 @click.password_option(prompt="Пароль пользователя")
-def add_user_command(username, full_name, position, password):
+def add_user_command(username, full_name, password):
     """Добавить пользователя с правом просмотра."""
     error = validate_new_user(username, password)
     if error:
         raise click.ClickException(error)
-    create_user(username, password, full_name, position)
+    create_user(username, password, full_name)
     click.echo(f"Готово. Пользователь {username} может входить для просмотра.")
 
 
@@ -1328,7 +1416,7 @@ SELECT t.*, a.num AS aud_num, c.num AS pc_num, ta.num AS t_aud_num,
        (SELECT COUNT(*) FROM ticket_messages m WHERE m.ticket_id = t.id) AS msg_count,
        (SELECT COUNT(*) FROM ticket_watchers w WHERE w.ticket_id = t.id) AS watchers,
        me.user_id IS NOT NULL AS watching, COALESCE(me.unread, 0) AS my_unread,
-       (SELECT u.position FROM users u WHERE u.id = t.author_id) AS author_position
+       (SELECT av.version FROM user_avatars av WHERE av.user_id = t.author_id) AS author_avatar
 FROM tickets t
 LEFT JOIN computers c ON c.id = t.computer_id
 LEFT JOIN auditoriums a ON a.id = c.auditorium_id

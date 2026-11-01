@@ -20,11 +20,25 @@
   <span class="badge kind-{{ kind }}">{{ TICKET_KINDS.get(kind, kind) }}</span>
 {%- endmacro %}
 
-{% macro author_link(t, position=False) -%}
+{# Аватарка: фото, а если его нет — инициалы на круге, цвет которого зависит от пользователя. #}
+{% macro avatar(user_id, version, name, size=32) -%}
+  {%- if version and user_id -%}
+    <img class="avatar" src="{{ url_for('user_avatar', user_id=user_id, v=version) }}" width="{{ size }}" height="{{ size }}"
+         style="--size: {{ size }}px" alt="" loading="lazy">
+  {%- else -%}
+    {%- set words = (name or '?').split() -%}
+    <span class="avatar avatar-empty" style="--size: {{ size }}px; --hue: {{ ((user_id or 0) * 47) % 360 }}" aria-hidden="true">
+      {{- (words[0][:1] ~ (words[1][:1] if words|length > 1 else ''))|upper -}}
+    </span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro author_link(t, with_avatar=False, size=20) -%}
   {%- set name = t.author_name or t.author_username or 'администратор' -%}
+  {%- if with_avatar and t.author_id %}<span class="author">{{ avatar(t.author_id, t.author_avatar, name, size) }}{% endif -%}
   {%- if t.author_id -%}<a href="{{ url_for('user_profile', user_id=t.author_id) }}">{{ name }}</a>
   {%- else %}{{ name }}{% endif -%}
-  {%- if position and t.author_position %} <span class="muted small">· {{ t.author_position }}</span>{% endif -%}
+  {%- if with_avatar and t.author_id %}</span>{% endif -%}
 {%- endmacro %}
 
 {% macro delete_button(action, label, confirm_text, extra='') -%}

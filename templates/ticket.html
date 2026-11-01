@@ -17,7 +17,7 @@
     {% elif t.hostname %}<span class="mono">{{ t.hostname }}</span> <span class="muted small">({{ 'удалена' if t.hostname.startswith('AUD-') else 'удалён' }})</span>
     {% else %}—{% endif %}</dd></div>
   {% if t.software_name %}<div><dt>Программа</dt><dd>{{ t.software_name }}</dd></div>{% endif %}
-  <div><dt>Автор</dt><dd>{{ author_link(t, position=True) }}</dd></div>
+  <div><dt>Автор</dt><dd>{{ author_link(t, with_avatar=True, size=24) }}</dd></div>
   <div><dt>Создана</dt><dd>{{ t.created_at }}</dd></div>
   <div><dt>Касается</dt><dd>{{ t.watchers }} польз.</dd></div>
 </dl>

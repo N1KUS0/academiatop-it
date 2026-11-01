@@ -318,3 +318,16 @@ form.inline { display: inline; margin: 0; }
   .card, .table-wrap { box-shadow: none; }
 }
 .footer-author { color: var(--accent); font-weight: 600; }
+
+/* ---------- аватарки ---------- */
+.avatar { --size: 32px; width: var(--size); height: var(--size); border-radius: 50%; object-fit: cover; flex: none; vertical-align: middle; }
+.avatar-empty {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: hsl(var(--hue, 20) 60% 88%); color: hsl(var(--hue, 20) 45% 28%);
+  font-weight: 700; font-size: calc(var(--size) * .4); line-height: 1; user-select: none;
+}
+.author, .nav-user { display: inline-flex; align-items: center; gap: 7px; vertical-align: middle; }
+.nav-user .avatar { margin: -4px 0; }
+.profile-head { display: flex; align-items: center; gap: 18px; margin-bottom: 14px; }
+.profile-head h1 { margin: 0; }
+.avatar-form { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

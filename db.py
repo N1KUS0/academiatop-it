@@ -79,10 +79,16 @@ CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY,
     username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
     full_name     TEXT NOT NULL DEFAULT '',   -- отображаемое имя (ФИО); пусто — показывается логин
-    position      TEXT NOT NULL DEFAULT '',   -- должность, меняет только администратор
     password_hash TEXT NOT NULL,
     created_at    TEXT NOT NULL DEFAULT '',
     last_login    TEXT NOT NULL DEFAULT ''
+);
+
+-- Аватарки пользователей: квадратный JPEG, уже уменьшенный при загрузке.
+CREATE TABLE IF NOT EXISTS user_avatars (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    image      BLOB NOT NULL,
+    version    TEXT NOT NULL                   -- случайная метка в ссылке: новая картинка — новый адрес, кэш браузера не мешает
 );
 
 -- Заявки пользователей: проблема или запрос на установку ПО.
@@ -208,8 +214,8 @@ def migrate(conn):
     if "source" not in cols:
         conn.execute("ALTER TABLE installations ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    if "position" not in cols:
-        conn.execute("ALTER TABLE users ADD COLUMN position TEXT NOT NULL DEFAULT ''")
+    if "position" in cols:  # должности были недолго, потом их убрали
+        conn.execute("ALTER TABLE users DROP COLUMN position")
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(tickets)")}
     if "auditorium_id" not in cols:
         conn.execute("ALTER TABLE tickets ADD COLUMN auditorium_id INTEGER "
