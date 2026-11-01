@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     auditorium_id   INTEGER REFERENCES auditoriums(id) ON DELETE SET NULL,  -- заявка на всю аудиторию, без ПК
     hostname        TEXT NOT NULL DEFAULT '',          -- имя ПК или аудитории на момент создания (если удалят)
     software_name   TEXT NOT NULL DEFAULT '',
+    need_by         TEXT NOT NULL DEFAULT '',          -- установка: к какой дате нужно (ISO), пусто — не важно
     author_id       INTEGER,                           -- users.id; NULL — администратор или удалённый пользователь
     author_username TEXT NOT NULL DEFAULT '',
     author_name     TEXT NOT NULL DEFAULT '',
@@ -124,6 +125,7 @@ CREATE INDEX IF NOT EXISTS ticket_computers_pc ON ticket_computers (computer_id)
 CREATE TABLE IF NOT EXISTS ticket_messages (
     id          INTEGER PRIMARY KEY,
     ticket_id   INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    author_id   INTEGER,                    -- users.id; NULL — администратор или неизвестно
     author_name TEXT NOT NULL DEFAULT '',
     is_admin    INTEGER NOT NULL DEFAULT 0,
     body        TEXT NOT NULL DEFAULT '',
@@ -131,6 +133,17 @@ CREATE TABLE IF NOT EXISTS ticket_messages (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ticket_messages_ticket ON ticket_messages (ticket_id);
+
+-- Фото к сообщениям заявки: уменьшенный JPEG и миниатюра, без метаданных.
+CREATE TABLE IF NOT EXISTS ticket_attachments (
+    id         INTEGER PRIMARY KEY,
+    ticket_id  INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    message_id INTEGER REFERENCES ticket_messages(id) ON DELETE CASCADE,
+    image      BLOB NOT NULL,
+    thumb      BLOB NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ticket_attachments_msg ON ticket_attachments (message_id);
 
 -- Кто следит за заявкой: автор и те, кого она «тоже касается». unread — есть новое для этого пользователя.
 CREATE TABLE IF NOT EXISTS ticket_watchers (
@@ -230,6 +243,18 @@ def migrate(conn):
     if "auditorium_id" not in cols:
         conn.execute("ALTER TABLE tickets ADD COLUMN auditorium_id INTEGER "
                      "REFERENCES auditoriums(id) ON DELETE SET NULL")
+    if "need_by" not in cols:
+        conn.execute("ALTER TABLE tickets ADD COLUMN need_by TEXT NOT NULL DEFAULT ''")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(ticket_messages)")}
+    if "author_id" not in cols:
+        conn.execute("ALTER TABLE ticket_messages ADD COLUMN author_id INTEGER")
+        # Старые сообщения: автор по имени, если оно однозначно совпадает с одним пользователем.
+        conn.execute("""UPDATE ticket_messages SET author_id = (
+                            SELECT u.id FROM users u
+                             WHERE COALESCE(NULLIF(u.full_name, ''), u.username) = ticket_messages.author_name)
+                        WHERE is_admin = 0 AND (
+                            SELECT COUNT(*) FROM users u
+                             WHERE COALESCE(NULLIF(u.full_name, ''), u.username) = ticket_messages.author_name) = 1""")
     # Автор всегда следит за своей заявкой (раньше непрочитанное автора хранилось в tickets.user_unread).
     conn.execute("""INSERT OR IGNORE INTO ticket_watchers (ticket_id, user_id, unread)
                     SELECT id, author_id, user_unread FROM tickets WHERE author_id IS NOT NULL""")

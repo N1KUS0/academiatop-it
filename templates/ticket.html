@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import csrf, delete_button, ticket_badge, kind_badge, author_link %}
+{% from "macros.html" import csrf, delete_button, ticket_badge, kind_badge, author_link, avatar %}
 {% block title %}Заявка №{{ t.id }}{% endblock %}
 {% block content %}
 <nav class="crumbs"><a href="{{ url_for('tickets') }}">Заявки</a> / №{{ t.id }}</nav>
@@ -21,6 +21,8 @@
     {% elif t.hostname %}<span class="mono">{{ t.hostname }}</span> <span class="muted small">({{ 'удалена' if t.hostname.startswith('AUD-') else 'удалён' }})</span>
     {% else %}—{% endif %}</dd></div>
   {% if t.software_name %}<div><dt>Программа</dt><dd>{{ t.software_name }}</dd></div>{% endif %}
+  {% if t.need_by %}<div><dt>Нужно</dt><dd><span class="badge need-by{{ ' urgent' if t.urgent }}">{{ need_by_text(t) }}</span>
+    <span class="muted small">{{ t.need_by | ru_date }}</span></dd></div>{% endif %}
   <div><dt>Автор</dt><dd>{{ author_link(t, with_avatar=True, size=24) }}</dd></div>
   <div><dt>Создана</dt><dd>{{ t.created_at }}</dd></div>
   <div><dt>Касается</dt><dd>{{ t.watchers }} польз.</dd></div>
@@ -73,10 +75,22 @@
   {% for m in messages %}
   <div class="msg {{ 'msg-admin' if m.is_admin }}" {% if loop.last %}id="last"{% endif %}>
     <div class="msg-head">
-      <b>{{ m.author_name }}</b>{% if m.is_admin %} <span class="muted small">администратор</span>{% endif %}
+      {% set name = m.author_now or m.author_name %}
+      {{ avatar(m.author_id if m.author_now else None, m.avatar, name, 28) }}
+      {% if m.author_now %}<a href="{{ url_for('user_profile', user_id=m.author_id) }}" class="strong">{{ name }}</a>
+      {%- else %}<b>{{ name }}</b>{% endif %}
+      {%- if m.is_admin %} <span class="muted small">администратор</span>{% endif %}
       <span class="muted small">{{ m.created_at }}</span>
     </div>
     {% if m.body %}<div class="msg-body">{{ m.body }}</div>{% endif %}
+    {% if photos.get(m.id) %}
+    <div class="msg-photos">
+      {% for pid in photos[m.id] %}
+      <a href="{{ url_for('ticket_photo', photo_id=pid) }}" target="_blank" rel="noopener" title="Открыть полностью">
+        <img src="{{ url_for('ticket_photo', photo_id=pid, thumb=1) }}" alt="Фото к заявке" loading="lazy"></a>
+      {% endfor %}
+    </div>
+    {% endif %}
     {% if m.status %}<div class="msg-status small">Статус: {{ ticket_badge(m.status) }}</div>{% endif %}
   </div>
   {% else %}
@@ -87,11 +101,15 @@
 {% if not can_write %}
 <p class="muted">Заявка закрыта. Если проблема повторилась — <a href="{{ url_for('ticket_new', kind=t.kind, computer=t.pc_link or '', auditorium=t.aud_link or '', pc=t.pcs) }}">создайте новую заявку</a>.</p>
 {% else %}
-<form method="post" action="{{ url_for('ticket_reply', ticket_id=t.id) }}" class="card stack reply-form">
+<form method="post" action="{{ url_for('ticket_reply', ticket_id=t.id) }}" class="card stack reply-form" enctype="multipart/form-data">
   {{ csrf() }}
   <label style="width:100%">{{ 'Ответ' if is_admin else 'Сообщение' }}
     <textarea name="body" rows="4" maxlength="5000"
               placeholder="{{ 'Ответ пользователю…' if is_admin else ('Дополнить заявку: например, «на PC-01-05 то же самое»…' if t.is_open else 'Если проблема не решена — напишите, заявка откроется снова.') }}"></textarea>
+  </label>
+  <label class="photo-input">Фото
+    <input type="file" name="photos" accept="image/jpeg,image/png,image/webp,image/gif" multiple data-max-files="{{ photo_max }}">
+    <span class="muted small">До {{ photo_max }} фото, например снимок ошибки на экране. Фото уменьшаются, место съёмки не сохраняется.</span>
   </label>
   <div class="form-row">
     {% if is_admin %}

@@ -168,7 +168,7 @@ h1 .badge { font-family: "Segoe UI", Roboto, sans-serif; font-size: 13px; }
   padding: 10px 14px; width: 100%; max-width: 760px; box-shadow: var(--shadow);
 }
 .msg-admin { border-left: 4px solid var(--accent); margin-left: auto; }
-.msg-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-bottom: 4px; }
+.msg-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
 .msg-head > .muted:last-child { margin-left: auto; }
 .msg-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg-status { margin-top: 6px; color: var(--ink-2); }
@@ -346,3 +346,32 @@ form.inline { display: inline; margin: 0; }
 .pc-picker-empty { margin: 0; }
 .link-btn { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-dark); cursor: pointer; }
 .link-btn:hover { text-decoration: underline; }
+
+/* ---------- срок «нужно к» ---------- */
+.badge.need-by { background: var(--info-soft); color: #2456a6; }
+.badge.need-by.urgent { background: #fde3e1; color: #b42318; font-weight: 600; }
+
+/* ---------- фото в заявках ---------- */
+.msg-photos { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.msg-photos img { display: block; max-width: 160px; max-height: 120px; border-radius: 8px; border: 1px solid var(--line); object-fit: cover; }
+.photo-input input[type=file] { padding: 6px 0; border: 0; background: none; }
+.photo-input .muted { font-weight: 400; }
+
+/* ---------- заявки на телефоне: карточки вместо таблицы ---------- */
+@media (max-width: 700px) {
+  .table-wrap:has(.ticket-table) { overflow: visible; }
+  .ticket-table, .ticket-table tbody { display: block; }
+  .ticket-table thead { display: none; }
+  .ticket-table tr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .ticket-table td { display: block; padding: 0; border: 0; }
+  .ticket-table .t-title { order: 1; flex-basis: 100%; }
+  .ticket-table .t-status { order: 2; }
+  .ticket-table .t-kind { order: 3; }
+  .ticket-table .t-id { order: 4; color: var(--muted); font-size: 12px; font-family: "Segoe UI", Roboto, sans-serif; }
+  .ticket-table .t-id::before { content: "№"; }
+  .ticket-table .t-where { order: 5; flex-basis: 100%; font-size: 13px; }
+  .ticket-table .t-author { order: 6; font-size: 13px; }
+  .ticket-table .t-date { order: 7; margin-left: auto; color: var(--muted); }
+  .ticket-table .t-watch { display: none; }
+  .ticket-table .t-where::before { content: "Где: "; color: var(--muted); font-family: "Segoe UI", Roboto, sans-serif; }
+}

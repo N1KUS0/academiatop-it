@@ -7,12 +7,13 @@ import os
 import secrets
 import sqlite3
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
 import click
 from flask import (Flask, Response, abort, flash, g, redirect, render_template,
                    request, send_file, session, url_for)
+from flask.sessions import SecureCookieSessionInterface
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import db
@@ -34,7 +35,7 @@ app.config.update(
     DATABASE=os.environ.get("REGISTRY_DB", os.path.join(BASE_DIR, "instance", "registry.db")),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),  # самый долгий вход — с «Запомнить меня»
     MAX_CONTENT_LENGTH=50 * 1024 * 1024,
 )
 os.makedirs(os.path.dirname(app.config["DATABASE"]), exist_ok=True)
@@ -55,6 +56,22 @@ def _load_secret_key():
 
 
 app.secret_key = _load_secret_key()
+
+# Вход живёт 12 часов с последнего захода, а с «Запомнить меня» — 30 дней.
+SESSION_LIFETIME = timedelta(hours=12)
+REMEMBER_LIFETIME = timedelta(days=30)
+
+
+class RememberSessionInterface(SecureCookieSessionInterface):
+    """Срок cookie входа зависит от галочки «Запомнить меня»."""
+
+    def get_expiration_time(self, app, session):
+        if not session.permanent:
+            return None
+        return datetime.now(timezone.utc) + (REMEMBER_LIFETIME if session.get("remember") else SESSION_LIFETIME)
+
+
+app.session_interface = RememberSessionInterface()
 app.teardown_appcontext(db.close_db)
 
 with app.app_context():
@@ -94,6 +111,9 @@ def current_user():
     """Вошедший пользователь: dict(id, username, name, admin) или None."""
     if "_user" not in g:
         g._user = None
+        now = int(time.time())
+        if not session.get("remember") and now - session.get("seen", now) > SESSION_LIFETIME.total_seconds():
+            session.clear()  # без «Запомнить меня» вход истекает через 12 часов без заходов
         if session.get("admin") is True and session.get("pwm") == password_marker():
             g._user = dict(id=None, username=get_setting_safe("admin_user"),
                            name="Администратор", admin=True, avatar=None)
@@ -103,6 +123,8 @@ def current_user():
             if row and session.get("pwm") == password_marker(row["password_hash"]):
                 g._user = dict(id=row["id"], username=row["username"],
                                name=row["full_name"] or row["username"], admin=False, avatar=row["avatar"])
+        if g._user and now - session.get("seen", 0) > 60:
+            session["seen"] = now
     return g._user
 
 
@@ -208,6 +230,8 @@ def login():
         if ok:
             conn.execute("DELETE FROM login_failures WHERE ip = ?", (ip,))
             session.clear()
+            session["remember"] = request.form.get("remember") == "1"
+            session["seen"] = int(time.time())
             if row is None:
                 session["admin"] = True
                 session["pwm"] = password_marker()
@@ -299,6 +323,7 @@ def create_user(username, password, full_name=""):
 def delete_user(conn, user_id):
     # Заявки удалённого пользователя остаются (с его именем), но больше ни к кому не привязаны.
     conn.execute("UPDATE tickets SET author_id = NULL WHERE author_id = ?", (user_id,))
+    conn.execute("UPDATE ticket_messages SET author_id = NULL WHERE author_id = ?", (user_id,))
     conn.execute("DELETE FROM ticket_watchers WHERE user_id = ?", (user_id,))
     conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     conn.commit()
@@ -344,7 +369,7 @@ def check_profile_access(user_id):
 
 AVATAR_SIZE = 256                    # сторона квадрата, px
 AVATAR_MAX_BYTES = 10 * 1024 * 1024  # исходный файл; фото с телефона обычно 2–6 МБ
-AVATAR_MAX_PIXELS = 50_000_000       # защита от «бомб»: маленький файл, огромная картинка
+IMAGE_MAX_PIXELS = 50_000_000        # защита от «бомб»: маленький файл, огромная картинка
 
 
 def pillow_available():
@@ -353,32 +378,38 @@ def pillow_available():
     return importlib.util.find_spec("PIL") is not None
 
 
-def make_avatar(data):
-    """Байты загруженной картинки -> квадратный JPEG AVATAR_SIZE px.
-    Картинка пересохраняется заново, поэтому метаданные фото (в том числе GPS) не сохраняются.
-    ValueError — если это не картинка."""
+def load_image(data):
+    """Байты загруженной картинки -> RGB-картинка Pillow, повёрнутая как снято. ValueError — если это не картинка.
+    Дальше картинка всегда пересохраняется заново, поэтому метаданные фото (в том числе GPS) не сохраняются."""
     import warnings
-    from PIL import Image, ImageOps  # Pillow нужен только здесь
+    from PIL import Image, ImageOps  # Pillow нужен только для картинок
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             img = Image.open(io.BytesIO(data))
-            if img.width * img.height > AVATAR_MAX_PIXELS:
+            if img.width * img.height > IMAGE_MAX_PIXELS:
                 raise ValueError("слишком большое разрешение")
             img = ImageOps.exif_transpose(img)  # фото с телефона — повернуть как снято
             if img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info):
                 img = img.convert("RGBA")
                 bg = Image.new("RGB", img.size, "white")
                 bg.paste(img, mask=img.getchannel("A"))
-                img = bg
-            else:
-                img = img.convert("RGB")
-            img = ImageOps.fit(img, (AVATAR_SIZE, AVATAR_SIZE), Image.LANCZOS)
-            out = io.BytesIO()
-            img.save(out, "JPEG", quality=88, optimize=True)
-            return out.getvalue()
+                return bg
+            return img.convert("RGB")
     except (OSError, SyntaxError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as e:
         raise ValueError(str(e)) from e
+
+
+def to_jpeg(img, quality=88):
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=quality, optimize=True)
+    return out.getvalue()
+
+
+def make_avatar(data):
+    """Байты загруженной картинки -> квадратный JPEG AVATAR_SIZE px. ValueError — если это не картинка."""
+    from PIL import Image, ImageOps
+    return to_jpeg(ImageOps.fit(load_image(data), (AVATAR_SIZE, AVATAR_SIZE), Image.LANCZOS))
 
 
 @app.route("/users/<int:user_id>/avatar")
@@ -1426,6 +1457,10 @@ def set_import_token_command():
 # --------------------------------------------------------------------------- заявки
 
 TICKET_BODY_MAX = 5000
+PHOTO_MAX_FILES = 3                 # фото в одном сообщении
+PHOTO_MAX_BYTES = 10 * 1024 * 1024  # один исходный файл
+PHOTO_SIDE = 1600                   # фото уменьшается до этой стороны (по большей)
+THUMB_SIDE = 320                    # миниатюра в переписке
 MAX_TICKET_PCS = 100  # компьютеров в одной заявке
 
 
@@ -1483,7 +1518,76 @@ def ticket_dict(row):
     user = current_user()
     t["is_author"] = bool(user and t["author_id"] is not None and t["author_id"] == user["id"])
     t["unread"] = t["admin_unread"] if user and user["admin"] else t["my_unread"]
+    # Срок для заявки на установку: «горит», если открыта и нужна сегодня или завтра (или срок прошёл).
+    t["need_by_days"] = (date.fromisoformat(t["need_by"]) - date.today()).days if t["need_by"] else None
+    t["urgent"] = t["is_open"] and t["need_by_days"] is not None and t["need_by_days"] <= 1
     return t
+
+
+def need_by_text(t):
+    """Срок заявки словами: «к 05.11 (завтра)»."""
+    days = t["need_by_days"]
+    when = {0: "сегодня", 1: "завтра", 2: "послезавтра"}.get(days) or ("срок прошёл" if days < 0 else "")
+    return f"к {date.fromisoformat(t['need_by']).strftime('%d.%m')}" + (f" ({when})" if when else "")
+
+
+app.jinja_env.globals["need_by_text"] = need_by_text
+
+
+def make_photo(data):
+    """Байты фото -> (JPEG до PHOTO_SIDE px, миниатюра до THUMB_SIDE px). ValueError — если это не картинка."""
+    img = load_image(data)
+    big, small = img.copy(), img.copy()
+    big.thumbnail((PHOTO_SIDE, PHOTO_SIDE))
+    small.thumbnail((THUMB_SIDE, THUMB_SIDE))
+    return to_jpeg(big, 85), to_jpeg(small, 80)
+
+
+def read_photos():
+    """Фото из поля photos формы -> (список (фото, миниатюра), предупреждение или None).
+    Если с фото что-то не так, текст сообщения всё равно сохраняется — без фото, с предупреждением."""
+    files = [f for f in request.files.getlist("photos") if f and f.filename]
+    if not files:
+        return [], None
+    if not pillow_available():
+        app.logger.error("ticket photos: Pillow is not installed, run pip install -r requirements.txt")
+        return [], "Фото не приложены: на сервере не установлена библиотека Pillow. Сообщите администратору."
+    if len(files) > PHOTO_MAX_FILES:
+        return [], f"Фото не приложены: можно не больше {PHOTO_MAX_FILES} в одном сообщении."
+    photos = []
+    for f in files:
+        data = f.read(PHOTO_MAX_BYTES + 1)
+        if len(data) > PHOTO_MAX_BYTES:
+            return [], f"Фото не приложены: «{f.filename}» больше {PHOTO_MAX_BYTES // 1024 // 1024} МБ."
+        try:
+            photos.append(make_photo(data))
+        except ValueError as e:
+            app.logger.warning("ticket photo rejected: %s: %s", f.filename, e)
+            return [], f"Фото не приложены: «{f.filename}» не похож на картинку. Подойдут JPG, PNG, WEBP или GIF."
+    return photos, None
+
+
+def save_photos(conn, ticket_id, message_id, photos, stamp):
+    conn.executemany("INSERT INTO ticket_attachments (ticket_id, message_id, image, thumb, created_at) "
+                     "VALUES (?, ?, ?, ?, ?)", [(ticket_id, message_id, big, small, stamp) for big, small in photos])
+
+
+def add_message(conn, ticket_id, user, body, stamp, status=""):
+    return conn.execute(
+        "INSERT INTO ticket_messages (ticket_id, author_id, author_name, is_admin, body, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (ticket_id, user["id"], user["name"], int(user["admin"]), body, status, stamp)).lastrowid
+
+
+@app.route("/tickets/photo/<int:photo_id>")
+def ticket_photo(photo_id):
+    column = "thumb" if request.args.get("thumb") else "image"
+    row = get_db().execute(f"SELECT {column} FROM ticket_attachments WHERE id = ?", (photo_id,)).fetchone()
+    if not row:
+        abort(404)
+    resp = Response(row[0], mimetype="image/jpeg")
+    resp.headers["Cache-Control"] = "private, max-age=2592000, immutable"  # фото по id не меняется
+    return resp
 
 
 def mark_watchers_unread(conn, ticket_id, except_user=None):
@@ -1507,10 +1611,13 @@ def notify_admin(text):
         telegram.send_async(token, chat, text)
 
 
-def tg_ticket_text(icon, t, who, body):
+def tg_ticket_text(icon, t, who, body, photos=0):
     from html import escape
     lines = [f"{icon} <b>Заявка №{t['id']}: {escape(t['title'])}</b>",
-             " · ".join(escape(x) for x in [TICKET_KINDS.get(t["kind"], ""), t["pc_label"] or "", who] if x)]
+             " · ".join(escape(x) for x in [TICKET_KINDS.get(t["kind"], ""), t["pc_label"] or "",
+                                            need_by_text(t) if t["need_by"] else "", who] if x)]
+    if photos:
+        lines.append(f"📎 фото: {photos}")
     if body:
         lines += ["", escape(body if len(body) <= 700 else body[:700] + "…")]
     lines += ["", ticket_url(t["id"])]
@@ -1608,7 +1715,9 @@ def tickets():
         params.append(kind)
     rows = get_db().execute(
         TICKETS_SQL + (" WHERE " + " AND ".join(where) if where else "")
-        + " ORDER BY t.status IN ('done', 'rejected'), t.updated_at DESC, t.id DESC", params).fetchall()
+        + " ORDER BY t.status IN ('done', 'rejected'),"
+          " CASE WHEN t.status IN ('done', 'rejected') OR t.need_by = '' THEN 1 ELSE 0 END, t.need_by,"
+          " t.updated_at DESC, t.id DESC", params).fetchall()
     return render_template("tickets.html", tickets=[ticket_dict(r) for r in rows], status=status, kind=kind,
                            mine=mine)
 
@@ -1624,10 +1733,11 @@ def ticket_new():
     if not auditorium and pcs and parse_hostname(pcs[0]):
         auditorium = aud_code(parse_hostname(pcs[0])[0])
     form = dict(kind=request.values.get("kind", "problem"), pcs=pcs, auditorium=auditorium,
-                software=request.values.get("software", ""), title="", body="")
+                software=request.values.get("software", ""), title="", body="", need_by="")
     if request.method == "POST":
         form.update(title=form_str("title"), body=request.form.get("body", "").strip()[:TICKET_BODY_MAX],
-                    software=form_str("software"), auditorium=form_str("auditorium", 20))
+                    software=form_str("software"), auditorium=form_str("auditorium", 20),
+                    need_by=form_date("need_by") if form["kind"] == "install" else "")
         computers = [find_computer(h) for h in pcs]
         missing = [h for h, c in zip(pcs, computers) if not c]
         aud = find_auditorium(form["auditorium"])
@@ -1645,6 +1755,11 @@ def ticket_new():
                   "В одной заявке — компьютеры одной аудитории.", "danger")
         elif form["kind"] == "install" and not form["software"]:
             flash("Укажите, какую программу установить.", "danger")
+        elif form["need_by"] is None:
+            form["need_by"] = ""
+            flash("Неверная дата в поле «Нужно к».", "danger")
+        elif form["need_by"] and form["need_by"] < date.today().isoformat():
+            flash("Дата в поле «Нужно к» уже прошла.", "danger")
         elif form["kind"] == "problem" and not form["title"]:
             flash("Кратко опишите проблему в поле «Тема».", "danger")
         else:
@@ -1654,28 +1769,31 @@ def ticket_new():
             # Один ПК — computer_id; несколько — аудитория + ticket_computers; ни одного — вся аудитория.
             single = computers[0] if len(computers) == 1 else None
             cur = conn.execute(
-                """INSERT INTO tickets (kind, title, computer_id, auditorium_id, hostname, software_name, author_id,
-                                        author_username, author_name, created_at, updated_at, admin_unread)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO tickets (kind, title, computer_id, auditorium_id, hostname, software_name, need_by,
+                                        author_id, author_username, author_name, created_at, updated_at, admin_unread)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (form["kind"], form["title"], single["id"] if single else None,
                  aud["id"] if aud and not single else None,
                  pcs[0] if single else aud_code(aud["num"]) if aud else "",
-                 form["software"] if form["kind"] == "install" else "",
+                 form["software"] if form["kind"] == "install" else "", form["need_by"],
                  user["id"], user["username"], user["name"], stamp, stamp, 0 if user["admin"] else 1))
             if len(computers) > 1:
                 conn.executemany("INSERT INTO ticket_computers (ticket_id, computer_id, hostname) VALUES (?, ?, ?)",
                                  [(cur.lastrowid, c["id"], h) for h, c in zip(pcs, computers)])
-            if form["body"]:
-                conn.execute("INSERT INTO ticket_messages (ticket_id, author_name, is_admin, body, created_at) "
-                             "VALUES (?, ?, ?, ?, ?)", (cur.lastrowid, user["name"], int(user["admin"]),
-                                                        form["body"], stamp))
+            photos, photo_warning = read_photos()
+            if form["body"] or photos:
+                msg_id = add_message(conn, cur.lastrowid, user, form["body"], stamp)
+                save_photos(conn, cur.lastrowid, msg_id, photos, stamp)
             if not user["admin"]:
                 watch(conn, cur.lastrowid, user["id"])
             conn.commit()
             app.logger.warning("ticket #%s created by %s", cur.lastrowid, user["username"])
             if not user["admin"]:
-                notify_admin(tg_ticket_text("🆕", get_ticket_or_404(cur.lastrowid), user["name"], form["body"]))
+                notify_admin(tg_ticket_text("🆕", get_ticket_or_404(cur.lastrowid), user["name"], form["body"],
+                                            len(photos)))
             flash(f"Заявка №{cur.lastrowid} отправлена. Ответ появится здесь, на странице заявки.", "success")
+            if photo_warning:
+                flash(photo_warning, "warning")
             return redirect(url_for("ticket", ticket_id=cur.lastrowid))
     return render_template("ticket_form.html", form=form, computers=list_computers(),
                            auditoriums=list_auditoriums(), sw_names=software_names())
@@ -1693,8 +1811,17 @@ def ticket(ticket_id):
         conn.execute("UPDATE ticket_watchers SET unread = 0 WHERE ticket_id = ? AND user_id = ?",
                      (ticket_id, current_user()["id"]))
         conn.commit()
-    messages = conn.execute("SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY id",
-                            (ticket_id,)).fetchall()
+    # Автор сообщения — по профилю: актуальное имя и аватарка (у старых сообщений без автора — имя как было).
+    messages = conn.execute(
+        """SELECT m.*, COALESCE(NULLIF(u.full_name, ''), u.username) AS author_now, av.version AS avatar
+           FROM ticket_messages m
+           LEFT JOIN users u ON u.id = m.author_id
+           LEFT JOIN user_avatars av ON av.user_id = m.author_id
+           WHERE m.ticket_id = ? ORDER BY m.id""", (ticket_id,)).fetchall()
+    photos = {}
+    for r in conn.execute("SELECT id, message_id FROM ticket_attachments WHERE ticket_id = ? ORDER BY id",
+                          (ticket_id,)):
+        photos.setdefault(r["message_id"], []).append(r["id"])
     # Для заявки на установку: на скольких ПК программы ещё нет.
     targets = install_targets(t) if t["kind"] == "install" and t["software_name"] else []
     missing = 0
@@ -1709,7 +1836,8 @@ def ticket(ticket_id):
                               auditorium_id=t["auditorium_id"]) if t["is_open"] else []
     # Список ПК заявки: ссылки только на существующие компьютеры.
     pc_rows = [dict(hostname=h, exists=bool(find_computer(h))) for h in t["pcs"]]
-    return render_template("ticket.html", t=t, messages=messages, similar=similar, pc_rows=pc_rows,
+    return render_template("ticket.html", t=t, messages=messages, photos=photos, similar=similar, pc_rows=pc_rows,
+                           photo_max=PHOTO_MAX_FILES,
                            install_total=len(targets), install_missing=missing,
                            can_write=t["is_open"] or current_user()["admin"] or bool(t["watching"]))
 
@@ -1722,20 +1850,23 @@ def ticket_reply(ticket_id):
     status = request.form.get("status", "") if user["admin"] else ""
     if status not in TICKET_STATUSES or status == t["status"]:
         status = ""
-    if not user["admin"] and not t["is_open"]:
+    if not user["admin"] and not t["is_open"] and not t["watching"]:
         # В закрытой заявке пишут только автор и следящие — и тогда она открывается снова.
-        if not t["watching"]:
-            flash("Заявка закрыта. Если проблема повторилась — создайте новую.", "warning")
-            return redirect(url_for("ticket", ticket_id=ticket_id))
-        if body:
-            status = "new"
-    if not body and not status:
-        flash("Напишите сообщение" + (" или выберите новый статус." if user["admin"] else "."), "warning")
+        flash("Заявка закрыта. Если проблема повторилась — создайте новую.", "warning")
+        return redirect(url_for("ticket", ticket_id=ticket_id))
+    photos, photo_warning = read_photos()
+    if photo_warning:
+        flash(photo_warning, "warning")
+    if not user["admin"] and not t["is_open"] and (body or photos):
+        status = "new"
+    if not body and not status and not photos:
+        if not photo_warning:
+            flash("Напишите сообщение" + (" или выберите новый статус." if user["admin"] else "."), "warning")
         return redirect(url_for("ticket", ticket_id=ticket_id))
     conn = get_db()
     stamp = now_str()
-    conn.execute("INSERT INTO ticket_messages (ticket_id, author_name, is_admin, body, status, created_at) "
-                 "VALUES (?, ?, ?, ?, ?, ?)", (ticket_id, user["name"], int(user["admin"]), body, status, stamp))
+    msg_id = add_message(conn, ticket_id, user, body, stamp, status)
+    save_photos(conn, ticket_id, msg_id, photos, stamp)
     conn.execute("UPDATE tickets SET updated_at = ?, status = COALESCE(NULLIF(?, ''), status) WHERE id = ?",
                  (stamp, status, ticket_id))
     if not user["admin"]:
@@ -1744,8 +1875,8 @@ def ticket_reply(ticket_id):
     mark_watchers_unread(conn, ticket_id, except_user=user["id"])
     conn.commit()
     if not user["admin"]:
-        notify_admin(tg_ticket_text("🔄" if status == "new" else "💬", t, user["name"], body))
-    flash("Сообщение отправлено." if body else "Статус изменён.", "success")
+        notify_admin(tg_ticket_text("🔄" if status == "new" else "💬", t, user["name"], body, len(photos)))
+    flash("Сообщение отправлено." if body or photos else "Статус изменён.", "success")
     return redirect(url_for("ticket", ticket_id=ticket_id) + "#last")
 
 
@@ -1835,7 +1966,7 @@ def telegram_settings():
                 flash(f"chat id {chat_id} — {title}", "info")
         else:
             chat = form_str("chat", 50) or db.get_setting("telegram_chat", "")
-            telegram.send(token, chat, "✅ Реестр ПО: уведомления о заявках будут приходить сюда.")
+            telegram.send(token, chat, f"✅ {SITE_NAME}: уведомления о заявках будут приходить сюда.")
             flash("Тестовое сообщение отправлено — проверьте Telegram.", "success")
     except RuntimeError as e:
         flash(f"Telegram ответил ошибкой: {e}", "danger")

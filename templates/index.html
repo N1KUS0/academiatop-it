@@ -22,6 +22,7 @@
       <td class="mono muted nowrap">№{{ t.id }}</td>
       <td><a href="{{ url_for('ticket', ticket_id=t.id) }}" class="strong">{{ t.title }}</a>
           {% if t.unread %}<span class="badge new-dot">новое</span>{% endif %}
+          {% if t.need_by %}<span class="badge need-by{{ ' urgent' if t.urgent }}">{{ need_by_text(t) }}</span>{% endif %}
           <div class="muted small">{% if t.pc_label %}{{ t.pc_label }} · {% endif %}{{ author_link(t) }}{% if t.watchers > 1 %} · касается {{ t.watchers }}{% endif %}</div></td>
       <td>{{ kind_badge(t.kind) }}</td>
       <td class="num">{{ ticket_badge(t.status) }}</td>

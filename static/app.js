@@ -157,3 +157,23 @@ document.querySelectorAll("[data-filter-table]").forEach(function (input) {
   form.addEventListener("change", function (e) { if (e.target.name === "pc") refresh(); });
   refresh();
 })();
+
+// Фото к заявке: сразу предупредить, если файлов слишком много или они слишком большие
+// (сервер всё равно проверит, но большой запрос nginx отклонит целиком, без понятного сообщения).
+document.querySelectorAll('input[type=file][name="photos"]').forEach(function (input) {
+  var MAX_FILE = 10 * 1024 * 1024, MAX_TOTAL = 18 * 1024 * 1024;
+  input.addEventListener("change", function () {
+    var files = Array.prototype.slice.call(input.files);
+    var max = parseInt(input.dataset.maxFiles, 10) || 3;
+    var total = files.reduce(function (s, f) { return s + f.size; }, 0);
+    var big = files.filter(function (f) { return f.size > MAX_FILE; })[0];
+    var error = files.length > max ? "Можно приложить не больше " + max + " фото."
+      : big ? "Фото «" + big.name + "» больше 10 МБ."
+      : total > MAX_TOTAL ? "Фото вместе больше 18 МБ — выберите меньше или поменьше."
+      : "";
+    if (error) {
+      alert(error);
+      input.value = "";
+    }
+  });
+});

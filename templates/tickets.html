@@ -40,21 +40,22 @@
 
 {% if tickets %}
 <div class="table-wrap">
-<table class="table" id="tickets-table">
+<table class="table ticket-table" id="tickets-table">
   <thead><tr><th>№</th><th>Тема</th><th>Тип</th><th>ПК / аудитория</th><th>Автор</th><th class="num" title="Скольких пользователей касается">Касается</th><th>Статус</th><th>Обновлена</th></tr></thead>
   <tbody>
   {% for t in tickets %}
   <tr class="{{ 'unread' if t.unread }}">
-    <td class="mono">{{ t.id }}</td>
-    <td><a href="{{ url_for('ticket', ticket_id=t.id) }}" class="strong">{{ t.title }}</a>
+    <td class="mono t-id">{{ t.id }}</td>
+    <td class="t-title"><a href="{{ url_for('ticket', ticket_id=t.id) }}" class="strong">{{ t.title }}</a>
         {% if t.unread %}<span class="badge new-dot">новое</span>{% endif %}
+        {% if t.need_by and t.is_open %}<span class="badge need-by{{ ' urgent' if t.urgent }}">{{ need_by_text(t) }}</span>{% endif %}
         {% if t.msg_count %}<span class="muted small">· {{ t.msg_count }} сообщ.</span>{% endif %}</td>
-    <td>{{ kind_badge(t.kind) }}</td>
-    <td class="mono">{{ t.pc_label or '—' }}</td>
-    <td>{{ author_link(t, with_avatar=True) }}{% if t.is_author %} <span class="muted small">(вы)</span>{% endif %}</td>
-    <td class="num">{{ t.watchers or '—' }}{% if t.watching and not t.is_author %} <span title="Вы отслеживаете">★</span>{% endif %}</td>
-    <td>{{ ticket_badge(t.status) }}</td>
-    <td class="nowrap small">{{ t.updated_at }}</td>
+    <td class="t-kind">{{ kind_badge(t.kind) }}</td>
+    <td class="mono t-where">{{ t.pc_label or '—' }}</td>
+    <td class="t-author">{{ author_link(t, with_avatar=True) }}{% if t.is_author %} <span class="muted small">(вы)</span>{% endif %}</td>
+    <td class="num t-watch">{{ t.watchers or '—' }}{% if t.watching and not t.is_author %} <span title="Вы отслеживаете">★</span>{% endif %}</td>
+    <td class="t-status">{{ ticket_badge(t.status) }}</td>
+    <td class="nowrap small t-date">{{ t.updated_at }}</td>
   </tr>
   {% endfor %}
   </tbody>
