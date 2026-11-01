@@ -24,7 +24,7 @@
     <tbody>
     {% for u in users %}
       <tr>
-        <td><strong>{{ u.username }}</strong></td>
+        <td><a href="{{ url_for('user_edit', user_id=u.id) }}" class="strong">{{ u.username }}</a></td>
         <td>{{ u.full_name or '—' }}</td>
         <td>{{ u.created_at | ru_date }}</td>
         <td>{{ u.last_login or 'ещё не входил' }}</td>
@@ -36,8 +36,10 @@
             <button class="btn btn-sm">Сменить</button>
           </form>
         </td>
-        <td class="num">{{ delete_button(url_for('user_delete', user_id=u.id), 'Удалить',
-                                       'Удалить пользователя ' ~ u.username ~ '?') }}</td>
+        <td class="num nowrap">
+          <a class="btn btn-sm" href="{{ url_for('user_edit', user_id=u.id) }}">Изменить</a>
+          {{ delete_button(url_for('user_delete', user_id=u.id), 'Удалить',
+                           'Удалить пользователя ' ~ u.username ~ '?') }}</td>
       </tr>
     {% endfor %}
     </tbody>

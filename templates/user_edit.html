@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf, delete_button %}
+{% block title %}Пользователь {{ user.username }}{% endblock %}
+{% block content %}
+<nav class="crumbs"><a href="{{ url_for('users_page') }}">Пользователи</a> / {{ user.username }}</nav>
+<h1>{{ user.full_name or user.username }}</h1>
+
+<dl class="card specs">
+  <div><dt>Создан</dt><dd>{{ user.created_at | ru_date }}</dd></div>
+  <div><dt>Последний вход</dt><dd>{{ user.last_login or 'ещё не входил' }}</dd></div>
+  <div><dt>Заявок</dt><dd>{{ tickets }}</dd></div>
+</dl>
+
+<section class="card">
+  <h2>Профиль</h2>
+  <form method="post" action="{{ url_for('user_edit', user_id=user.id) }}" class="form-row">
+    {{ csrf() }}
+    <label>Логин <input type="text" name="username" value="{{ form.username }}" required maxlength="50" autocomplete="off"></label>
+    <label class="grow">ФИО / должность <input type="text" name="full_name" value="{{ form.full_name }}" maxlength="200"
+                                              placeholder="например, Иванов И.И., преподаватель"></label>
+    <button class="btn btn-primary">Сохранить</button>
+  </form>
+  <p class="muted small">При смене логина пользователь остаётся в системе, но входить дальше будет с новым логином — сообщите ему.</p>
+</section>
+
+<section class="card">
+  <h2>Пароль</h2>
+  <form method="post" action="{{ url_for('user_password', user_id=user.id) }}" class="form-row">
+    {{ csrf() }}
+    <input type="hidden" name="back" value="edit">
+    <label>Новый пароль <input type="text" name="password" required minlength="{{ min_len }}" autocomplete="new-password"
+                               placeholder="не короче {{ min_len }} символов"></label>
+    <button class="btn">Сменить пароль</button>
+  </form>
+  <p class="muted small">После смены пароля все открытые сессии пользователя закрываются.</p>
+</section>
+
+<div class="danger-zone">
+  {{ delete_button(url_for('user_delete', user_id=user.id), 'Удалить пользователя',
+     'Удалить пользователя ' ~ user.username ~ '? Его заявки сохранятся.') }}
+</div>
+{% endblock %}

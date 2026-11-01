@@ -247,15 +247,20 @@ def set_password(username, password):
 
 # --------------------------------------------------------------------------- пользователи (просмотр)
 
-def validate_new_user(username, password):
-    """Текст ошибки или None."""
+def validate_username(username, user_id=None):
+    """Текст ошибки или None. user_id — пользователь, которого переименовывают (его старый логин не занят)."""
     if not username or len(username) > 50 or any(ch.isspace() for ch in username):
         return "Логин не может быть пустым, длиннее 50 символов или содержать пробелы."
     if username.lower() == get_setting_safe("admin_user").lower():
         return "Этот логин занят администратором."
-    if get_db().execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
+    if get_db().execute("SELECT 1 FROM users WHERE username = ? AND id IS NOT ?", (username, user_id)).fetchone():
         return f"Пользователь «{username}» уже есть."
-    return validate_password(password)
+    return None
+
+
+def validate_new_user(username, password):
+    """Текст ошибки или None."""
+    return validate_username(username) or validate_password(password)
 
 
 def min_password_len(admin=False):
@@ -304,14 +309,50 @@ def user_new():
     return redirect(url_for("users_page"))
 
 
+def get_user_or_404(user_id):
+    row = get_db().execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        abort(404)
+    return row
+
+
+@app.route("/users/<int:user_id>", methods=["GET", "POST"])
+@admin_required
+def user_edit(user_id):
+    """Профиль пользователя: логин и ФИО / должность."""
+    user = get_user_or_404(user_id)
+    form = dict(username=user["username"], full_name=user["full_name"])
+    if request.method == "POST":
+        form = dict(username=form_str("username", 60), full_name=form_str("full_name"))
+        error = validate_username(form["username"], user_id)
+        if error:
+            flash(error, "danger")
+        else:
+            conn = get_db()
+            conn.execute("UPDATE users SET username = ?, full_name = ? WHERE id = ?",
+                         (form["username"], form["full_name"], user_id))
+            # Автор в заявках показывается по профилю; в переписке остаются имена на момент сообщения.
+            conn.execute("UPDATE tickets SET author_username = ?, author_name = ? WHERE author_id = ?",
+                         (form["username"], form["full_name"] or form["username"], user_id))
+            conn.commit()
+            if form["username"] != user["username"]:
+                app.logger.warning("user renamed: %s -> %s", user["username"], form["username"])
+            flash("Профиль сохранён." + (f" Новый логин для входа — «{form['username']}»."
+                                          if form["username"] != user["username"] else ""), "success")
+            return redirect(url_for("user_edit", user_id=user_id))
+    tickets = get_db().execute("SELECT COUNT(*) FROM tickets WHERE author_id = ?", (user_id,)).fetchone()[0]
+    return render_template("user_edit.html", user=user, form=form, tickets=tickets, min_len=MIN_PASSWORD_LEN)
+
+
 @app.route("/users/<int:user_id>/password", methods=["POST"])
 @admin_required
 def user_password(user_id):
+    back = url_for("user_edit", user_id=user_id) if request.form.get("back") == "edit" else url_for("users_page")
     password = request.form.get("password", "")
     error = validate_password(password)
     if error:
         flash(error, "danger")
-        return redirect(url_for("users_page"))
+        return redirect(back)
     conn = get_db()
     cur = conn.execute("UPDATE users SET password_hash = ? WHERE id = ?",
                        (generate_password_hash(password), user_id))
@@ -319,7 +360,7 @@ def user_password(user_id):
     if not cur.rowcount:
         abort(404)
     flash("Пароль изменён. Открытые сессии этого пользователя закрыты.", "success")
-    return redirect(url_for("users_page"))
+    return redirect(back)
 
 
 @app.route("/users/<int:user_id>/delete", methods=["POST"])
