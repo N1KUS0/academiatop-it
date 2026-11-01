@@ -46,6 +46,10 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
 
+# Какая версия установлена — по ней deploy/update.sh понимает, есть ли что обновлять.
+git -c safe.directory="$SRC_DIR" -C "$SRC_DIR" rev-parse HEAD > "$APP_DIR/instance/deployed-commit" 2>/dev/null \
+    || rm -f "$APP_DIR/instance/deployed-commit"
+
 echo
 echo "Готово. Сайт: http://$(hostname -I | awk '{print $1}')/"
 if ! sudo -u registry REGISTRY_DB="$APP_DIR/instance/registry.db" \

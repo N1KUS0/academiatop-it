@@ -335,6 +335,12 @@ AVATAR_MAX_BYTES = 10 * 1024 * 1024  # исходный файл; фото с т
 AVATAR_MAX_PIXELS = 50_000_000       # защита от «бомб»: маленький файл, огромная картинка
 
 
+def pillow_available():
+    """Pillow ставится из requirements.txt; без него сайт работает, но аватарки не загрузить."""
+    import importlib.util
+    return importlib.util.find_spec("PIL") is not None
+
+
 def make_avatar(data):
     """Байты загруженной картинки -> квадратный JPEG AVATAR_SIZE px.
     Картинка пересохраняется заново, поэтому метаданные фото (в том числе GPS) не сохраняются.
@@ -380,7 +386,11 @@ def user_avatar_upload(user_id):
     get_user_or_404(user_id)
     file = request.files.get("avatar")
     data = file.read(AVATAR_MAX_BYTES + 1) if file and file.filename else b""
-    if not data:
+    if not pillow_available():
+        app.logger.error("avatar upload: Pillow is not installed, run pip install -r requirements.txt")
+        flash("Загрузка аватарок пока не работает: на сервере не установлена библиотека Pillow. "
+              "Сообщите администратору.", "danger")
+    elif not data:
         flash("Выберите файл с фотографией.", "danger")
     elif len(data) > AVATAR_MAX_BYTES:
         flash(f"Файл больше {AVATAR_MAX_BYTES // 1024 // 1024} МБ — выберите фото поменьше.", "danger")
@@ -442,7 +452,7 @@ def user_profile(user_id):
         TICKETS_SQL + " WHERE t.author_id = ? ORDER BY t.status IN ('done', 'rejected'), t.updated_at DESC, t.id DESC",
         (me["id"], user_id))]
     return render_template("user_profile.html", user=user, form=form, tickets=tickets, is_self=is_self,
-                           min_len=MIN_PASSWORD_LEN)
+                           min_len=MIN_PASSWORD_LEN, avatars_ok=pillow_available())
 
 
 @app.route("/users/<int:user_id>/password", methods=["POST"])

@@ -26,10 +26,13 @@ OWNER="$(stat -c %U "$SRC_DIR")"
 git_src() {
     if [ "$(id -un)" = "$OWNER" ]; then git -C "$SRC_DIR" "$@"; else sudo -u "$OWNER" git -C "$SRC_DIR" "$@"; fi
 }
-OLD="$(git_src rev-parse HEAD)"
 git_src pull --ff-only
 NEW="$(git_src rev-parse HEAD)"
-if [ "$OLD" = "$NEW" ] && [ "$FORCE" != "--force" ]; then
+# Сравниваем с тем, что реально стоит на сайте, а не с прошлым git pull:
+# если прошлое обновление сорвалось (например, pip без сети), этот запуск его доделает.
+DEPLOYED_FILE="$APP_DIR/instance/deployed-commit"
+DEPLOYED="$($SUDO cat "$DEPLOYED_FILE" 2>/dev/null || true)"
+if [ "$DEPLOYED" = "$NEW" ] && [ "$FORCE" != "--force" ]; then
     echo "Новых изменений нет, на сервере уже $(git_src log -1 --format='%h %s')."
     echo "Переустановить всё равно: bash deploy/update.sh --force"
     exit 0
@@ -44,21 +47,23 @@ if [ -f "$DB" ]; then
 fi
 
 # Что изменилось из настроек сервера — сравниваем до копирования.
-REQS_CHANGED=0; SERVICE_CHANGED=0; NGINX_CHANGED=0
-cmp -s "$SRC_DIR/requirements.txt" "$APP_DIR/requirements.txt" || REQS_CHANGED=1
+SERVICE_CHANGED=0; NGINX_CHANGED=0
 cmp -s "$SRC_DIR/deploy/registry.service" /etc/systemd/system/registry.service || SERVICE_CHANGED=1
 cmp -s "$SRC_DIR/deploy/nginx-registry.conf" /etc/nginx/sites-available/registry || NGINX_CHANGED=1
+
+# Зависимости ставим до копирования: если pip не сработает, сайт останется на прежней версии,
+# а следующий запуск попробует снова. Уже установленное pip не скачивает заново — это быстро.
+echo "==> Зависимости Python"
+if ! $SUDO "$APP_DIR/.venv/bin/pip" install -q -r "$SRC_DIR/requirements.txt"; then
+    echo "Не удалось установить зависимости Python (нужен доступ к pypi.org). Сайт не обновлён." >&2
+    exit 1
+fi
 
 echo "==> Копирование файлов в $APP_DIR"
 $SUDO rsync -a --delete \
     --exclude '.venv' --exclude 'instance' --exclude '__pycache__' --exclude '.claude' --exclude '.git' --exclude '*.zip' \
     "$SRC_DIR/" "$APP_DIR/"
 $SUDO chmod +x "$APP_DIR/deploy/"*.sh
-
-if [ "$REQS_CHANGED" = 1 ]; then
-    echo "==> Зависимости Python"
-    $SUDO "$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
-fi
 
 if [ "$SERVICE_CHANGED" = 1 ]; then
     echo "==> systemd: служба изменилась"
@@ -84,11 +89,13 @@ if ! $SUDO systemctl is-active --quiet registry; then
     exit 1
 fi
 
+echo "$NEW" | $SUDO tee "$DEPLOYED_FILE" >/dev/null
+
 echo
 echo "Готово: $(git_src log -1 --format='%h %s')"
-if [ "$OLD" != "$NEW" ]; then
+if [ -n "$DEPLOYED" ] && [ "$DEPLOYED" != "$NEW" ] && git_src cat-file -e "$DEPLOYED^{commit}" 2>/dev/null; then
     echo "Изменения:"
-    git_src log --format='  %h %s' "$OLD..$NEW"
+    git_src log --format='  %h %s' "$DEPLOYED..$NEW"
 fi
 exit 0
 }

@@ -22,6 +22,14 @@
 {% if is_admin or is_self %}
 <section class="card">
   <h2>Аватарка</h2>
+  {% if not avatars_ok %}
+  <div class="flash flash-warning">
+    Загрузка аватарок не работает: на сервере не установлена библиотека Pillow.
+    {% if is_admin %}Выполните на сервере
+    <code>sudo /opt/registry/.venv/bin/pip install -r /opt/registry/requirements.txt &amp;&amp; sudo systemctl restart registry</code>
+    {%- else %}Сообщите администратору.{% endif %}
+  </div>
+  {% endif %}
   <div class="avatar-form">
     <form method="post" action="{{ url_for('user_avatar_upload', user_id=user.id) }}" enctype="multipart/form-data" class="avatar-form">
       {{ csrf() }}
