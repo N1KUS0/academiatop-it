@@ -1,0 +1,28 @@
+{% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endmacro %}
+
+{% macro status_badge(status) -%}
+  <span class="badge status-{{ status }}">{{ STATUSES.get(status, status) }}</span>
+{%- endmacro %}
+
+{% macro cat_badge(category) -%}
+  <span class="badge cat">{{ CATEGORIES.get(category, category) }}</span>
+{%- endmacro %}
+
+{% macro lic_badge(lic) -%}
+  <span class="badge lic-{{ lic }}">{{ LICENSE_TYPES.get(lic, lic) }}</span>
+{%- endmacro %}
+
+{% macro ticket_badge(status) -%}
+  <span class="badge ticket-{{ status }}">{{ TICKET_STATUSES.get(status, status) }}</span>
+{%- endmacro %}
+
+{% macro kind_badge(kind) -%}
+  <span class="badge kind-{{ kind }}">{{ TICKET_KINDS.get(kind, kind) }}</span>
+{%- endmacro %}
+
+{% macro delete_button(action, label, confirm_text, extra='') -%}
+  <form method="post" action="{{ action }}" class="inline" data-confirm="{{ confirm_text }}">
+    {{ csrf() }}{{ extra }}
+    <button class="btn btn-danger btn-sm">{{ label }}</button>
+  </form>
+{%- endmacro %}

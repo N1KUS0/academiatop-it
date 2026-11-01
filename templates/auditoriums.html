@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf %}
+{% block title %}Аудитории{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Аудитории</h1>
+</div>
+
+{% if is_admin %}
+<form method="post" action="{{ url_for('auditorium_new') }}" class="card form-row">
+  {{ csrf() }}
+  <label>Номер
+    <span class="prefixed"><span>AUD-</span><input type="number" name="num" min="1" required style="width:5em"></span>
+  </label>
+  <label>Этаж <input type="number" name="floor" style="width:5em"></label>
+  <label class="grow">Примечание <input type="text" name="note" placeholder="например, компьютерный класс"></label>
+  <button class="btn btn-primary">Добавить аудиторию</button>
+</form>
+{% endif %}
+
+<div class="aud-grid">
+  {% for a in auditoriums %}
+  {% set code = 'AUD-' ~ a.num %}
+  <a class="card aud-card" href="{{ url_for('auditorium', code=code) }}">
+    <div class="aud-card-head">
+      <h2>{{ code }}</h2>
+      <span class="muted">{% if a.floor is not none %}{{ a.floor }} этаж{% endif %}</span>
+    </div>
+    {% if a.note %}<p class="muted small">{{ a.note }}</p>{% endif %}
+    <div class="pc-mini">
+      {% for c in computers if c.auditorium_id == a.id %}
+        <span class="pc-dot status-{{ c.status }}" title="{{ c.hostname }} — {{ c.sw_count }} прогр.">{{ '%02d'|format(c.num) }}</span>
+      {% else %}
+        <span class="muted small">Компьютеров пока нет</span>
+      {% endfor %}
+    </div>
+    <div class="aud-card-foot">{{ a.pc_count }} ПК</div>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

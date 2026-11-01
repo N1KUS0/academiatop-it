@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf %}
+{% block title %}Смена пароля{% endblock %}
+{% block content %}
+<form method="post" class="card login-card">
+  {{ csrf() }}
+  <h1>Смена пароля</h1>
+  <p class="muted small">Логин: <strong>{{ current_user.username }}</strong>{% if current_user.name != current_user.username %} · {{ current_user.name }}{% endif %}</p>
+  <label>Текущий пароль <input type="password" name="current" required autofocus autocomplete="current-password"></label>
+  <label>Новый пароль <input type="password" name="new" required minlength="{{ min_len }}" autocomplete="new-password"></label>
+  <label>Новый пароль ещё раз <input type="password" name="confirm" required minlength="{{ min_len }}" autocomplete="new-password"></label>
+  <p class="muted small">Не короче {{ min_len }} символов. После смены на других устройствах нужно будет войти заново.</p>
+  <button class="btn btn-primary">Сменить пароль</button>
+</form>
+{% endblock %}

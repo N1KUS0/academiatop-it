@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf, delete_button, ticket_badge, kind_badge %}
+{% block title %}Заявка №{{ t.id }}{% endblock %}
+{% block content %}
+<nav class="crumbs"><a href="{{ url_for('tickets') }}">Заявки</a> / №{{ t.id }}</nav>
+<div class="page-head">
+  <h1>{{ t.title }} {{ ticket_badge(t.status) }}</h1>
+</div>
+
+<dl class="card specs">
+  <div><dt>Номер</dt><dd>№{{ t.id }}</dd></div>
+  <div><dt>Тип</dt><dd>{{ kind_badge(t.kind) }}</dd></div>
+  <div><dt>Где</dt><dd>
+    {% if t.pc_link %}<a class="mono" href="{{ url_for('computer', hostname=t.pc_link) }}">{{ t.pc_link }}</a>
+    {% elif t.aud_link %}<a class="mono" href="{{ url_for('auditorium', code=t.aud_link) }}">{{ t.aud_link }}</a>
+      <span class="muted small">вся аудитория</span>
+    {% elif t.hostname %}<span class="mono">{{ t.hostname }}</span> <span class="muted small">({{ 'удалена' if t.hostname.startswith('AUD-') else 'удалён' }})</span>
+    {% else %}—{% endif %}</dd></div>
+  {% if t.software_name %}<div><dt>Программа</dt><dd>{{ t.software_name }}</dd></div>{% endif %}
+  <div><dt>Автор</dt><dd>{{ t.author_name or t.author_username }}</dd></div>
+  <div><dt>Создана</dt><dd>{{ t.created_at }}</dd></div>
+  <div><dt>Касается</dt><dd>{{ t.watchers }} польз.</dd></div>
+</dl>
+
+{% if not is_admin and not t.is_author and (t.watching or t.is_open) %}
+<form method="post" action="{{ url_for('ticket_watch', ticket_id=t.id) }}" class="card watch-box">
+  {{ csrf() }}
+  {% if t.watching %}
+    <span>★ Вы отслеживаете эту заявку — ответы по ней приходят и вам.</span>
+    <button class="btn btn-sm btn-link">Не отслеживать</button>
+  {% elif t.is_open %}
+    <span>У вас та же проблема? Не создавайте новую заявку — отметьтесь здесь.</span>
+    <button class="btn btn-primary">Меня тоже касается</button>
+  {% endif %}
+</form>
+{% endif %}
+
+{% if similar %}
+<div class="card similar">
+  <h3>Похожие открытые заявки</h3>
+  <ul>
+    {% for s in similar %}
+    <li><a href="{{ url_for('ticket', ticket_id=s.id) }}">№{{ s.id }} {{ s.title }}</a>
+        <span class="muted small">{{ s.pc_label }} · {{ TICKET_STATUSES[s.status] }}</span></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if is_admin and t.kind == 'install' and t.is_open %}
+  {% if install_missing %}
+  <form method="post" action="{{ url_for('ticket_install', ticket_id=t.id) }}" class="card form-row hint">
+    {{ csrf() }}
+    <span class="grow">Отметить <b>{{ t.software_name }}</b> установленной на <b class="mono">{{ t.pc_label }}</b>
+      {%- if t.aud_link %} — {{ install_missing }} ПК{% if install_missing < install_total %} из {{ install_total }}, на остальных уже есть{% endif %}{% endif %}
+      и закрыть заявку</span>
+    <label>Версия <input type="text" name="version" style="width:8em"></label>
+    <button class="btn btn-primary">Установлено</button>
+  </form>
+  {% elif install_total %}
+  <p class="muted small">{{ t.software_name }} уже отмечена на {{ t.pc_label }}{% if t.aud_link %} (все ПК){% endif %}.</p>
+  {% elif t.aud_link and t.software_name %}
+  <p class="muted small">В аудитории {{ t.aud_link }} нет компьютеров — отметить установку не на чем.</p>
+  {% endif %}
+{% endif %}
+
+<h2>Переписка</h2>
+<div class="thread">
+  {% for m in messages %}
+  <div class="msg {{ 'msg-admin' if m.is_admin }}" {% if loop.last %}id="last"{% endif %}>
+    <div class="msg-head">
+      <b>{{ m.author_name }}</b>{% if m.is_admin %} <span class="muted small">администратор</span>{% endif %}
+      <span class="muted small">{{ m.created_at }}</span>
+    </div>
+    {% if m.body %}<div class="msg-body">{{ m.body }}</div>{% endif %}
+    {% if m.status %}<div class="msg-status small">Статус: {{ ticket_badge(m.status) }}</div>{% endif %}
+  </div>
+  {% else %}
+  <p class="muted">Сообщений пока нет.</p>
+  {% endfor %}
+</div>
+
+{% if not can_write %}
+<p class="muted">Заявка закрыта. Если проблема повторилась — <a href="{{ url_for('ticket_new', kind=t.kind, computer=t.pc_link or '', auditorium=t.aud_link or '') }}">создайте новую заявку</a>.</p>
+{% else %}
+<form method="post" action="{{ url_for('ticket_reply', ticket_id=t.id) }}" class="card stack reply-form">
+  {{ csrf() }}
+  <label style="width:100%">{{ 'Ответ' if is_admin else 'Сообщение' }}
+    <textarea name="body" rows="4" maxlength="5000"
+              placeholder="{{ 'Ответ пользователю…' if is_admin else ('Дополнить заявку: например, «на PC-01-05 то же самое»…' if t.is_open else 'Если проблема не решена — напишите, заявка откроется снова.') }}"></textarea>
+  </label>
+  <div class="form-row">
+    {% if is_admin %}
+    <label>Статус
+      <select name="status">
+        {% for k, v in TICKET_STATUSES.items() %}<option value="{{ k }}" {{ 'selected' if t.status == k }}>{{ v }}</option>{% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <button class="btn btn-primary">Отправить</button>
+  </div>
+</form>
+{% endif %}
+
+{% if is_admin %}
+<div class="danger-zone">
+  {{ delete_button(url_for('ticket_delete', ticket_id=t.id), 'Удалить заявку',
+     'Удалить заявку №' ~ t.id ~ ' вместе с перепиской?') }}
+</div>
+{% endif %}
+{% endblock %}

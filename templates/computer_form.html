@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf %}
+{% block title %}{{ 'Новый компьютер' if is_new else 'Изменить ' ~ pc.hostname }}{% endblock %}
+{% block content %}
+<h1>{{ 'Новый компьютер' if is_new else 'Изменить ' ~ pc.hostname }}</h1>
+
+<form method="post" class="card form-grid" id="pc-form">
+  {{ csrf() }}
+  <div class="hostname-preview">Имя компьютера: <b class="mono" id="hostname-preview">PC-??-??</b></div>
+
+  <label>Аудитория *
+    <select name="auditorium_id" required id="pc-aud">
+      <option value="">—</option>
+      {% for a in auditoriums %}
+        <option value="{{ a.id }}" data-num="{{ a.num }}" {{ 'selected' if pc.auditorium_id|string == a.id|string }}>AUD-{{ a.num }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Номер ПК в аудитории *
+    <input type="number" name="num" min="1" max="99" required value="{{ pc.num }}" id="pc-num">
+  </label>
+  <label>Инвентарный номер <input type="text" name="inv_number" value="{{ pc.inv_number }}"></label>
+  <label>Статус
+    <select name="status">
+      {% for k, v in STATUSES.items() %}<option value="{{ k }}" {{ 'selected' if (pc.status or 'active') == k }}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>ОС <input type="text" name="os" value="{{ pc.os }}" list="os-list" placeholder="Windows 10 Pro">
+    <datalist id="os-list"><option value="Windows 10 Pro"><option value="Windows 11 Pro"><option value="Windows 11 Education"><option value="Ubuntu"><option value="Debian"><option value="Astra Linux"></datalist>
+  </label>
+  <label>Версия / сборка ОС <input type="text" name="os_version" value="{{ pc.os_version }}" placeholder="22H2"></label>
+  <label>Процессор <input type="text" name="cpu" value="{{ pc.cpu }}" placeholder="Intel Core i5-10400"></label>
+  <label>ОЗУ <input type="text" name="ram" value="{{ pc.ram }}" placeholder="16 ГБ"></label>
+  <label>Диск <input type="text" name="disk" value="{{ pc.disk }}" placeholder="SSD 512 ГБ"></label>
+  <label class="wide">Примечание <textarea name="note" rows="2">{{ pc.note }}</textarea></label>
+
+  <div class="wide form-actions">
+    <button class="btn btn-primary">Сохранить</button>
+    {% if is_new %}<button class="btn" name="add_another" value="1" title="Сохранить и сразу создать следующий ПК с теми же характеристиками">Сохранить и добавить следующий</button>{% endif %}
+    <a class="btn btn-link" href="{{ url_for('computer', hostname=pc.hostname) if not is_new and pc.hostname else url_for('computers') }}">Отмена</a>
+  </div>
+</form>
+{% endblock %}

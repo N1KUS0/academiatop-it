@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% from "macros.html" import ticket_badge, kind_badge %}
+{% block title %}Заявки{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Заявки <small class="muted">{{ tickets|length }}</small></h1>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('ticket_new', kind='install') }}">Запросить установку ПО</a>
+    <a class="btn btn-primary" href="{{ url_for('ticket_new', kind='problem') }}">Сообщить о проблеме</a>
+  </div>
+</div>
+
+{% if not is_admin %}
+<nav class="tabs">
+  <a href="{{ url_for('tickets', status=status, kind=kind) }}" class="{{ 'on' if not mine }}">Все заявки</a>
+  <a href="{{ url_for('tickets', status=status, kind=kind, mine=1) }}" class="{{ 'on' if mine }}">Мои и отслеживаемые</a>
+</nav>
+<p class="muted small">Прежде чем создавать заявку, проверьте, нет ли уже такой. Если есть — откройте её и нажмите «Меня тоже касается».</p>
+{% endif %}
+
+<form class="card filters" method="get">
+  {% if mine %}<input type="hidden" name="mine" value="1">{% endif %}
+  <label>Статус
+    <select name="status" onchange="this.form.submit()">
+      <option value="">Все</option>
+      <option value="open" {{ 'selected' if status == 'open' }}>Открытые (новые и в работе)</option>
+      {% for k, v in TICKET_STATUSES.items() %}<option value="{{ k }}" {{ 'selected' if status == k }}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Тип
+    <select name="kind" onchange="this.form.submit()">
+      <option value="">Любой</option>
+      {% for k, v in TICKET_KINDS.items() %}<option value="{{ k }}" {{ 'selected' if kind == k }}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="grow">Быстрый фильтр
+    <input type="search" data-filter-table="tickets-table" placeholder="тема, компьютер, аудитория, программа, автор…">
+  </label>
+</form>
+
+{% if tickets %}
+<div class="table-wrap">
+<table class="table" id="tickets-table">
+  <thead><tr><th>№</th><th>Тема</th><th>Тип</th><th>ПК / аудитория</th><th>Автор</th><th class="num" title="Скольких пользователей касается">Касается</th><th>Статус</th><th>Обновлена</th></tr></thead>
+  <tbody>
+  {% for t in tickets %}
+  <tr class="{{ 'unread' if t.unread }}">
+    <td class="mono">{{ t.id }}</td>
+    <td><a href="{{ url_for('ticket', ticket_id=t.id) }}" class="strong">{{ t.title }}</a>
+        {% if t.unread %}<span class="badge new-dot">новое</span>{% endif %}
+        {% if t.msg_count %}<span class="muted small">· {{ t.msg_count }} сообщ.</span>{% endif %}</td>
+    <td>{{ kind_badge(t.kind) }}</td>
+    <td class="mono">{{ t.pc_label or '—' }}</td>
+    <td>{{ t.author_name or t.author_username }}{% if t.is_author %} <span class="muted small">(вы)</span>{% endif %}</td>
+    <td class="num">{{ t.watchers or '—' }}{% if t.watching and not t.is_author %} <span title="Вы отслеживаете">★</span>{% endif %}</td>
+    <td>{{ ticket_badge(t.status) }}</td>
+    <td class="nowrap small">{{ t.updated_at }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty">Заявок нет.</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf %}
+{% block title %}{{ 'Новая программа' if is_new else 'Изменить ' ~ sw.name }}{% endblock %}
+{% block content %}
+<h1>{{ 'Новая программа' if is_new else 'Изменить «' ~ sw.name ~ '»' }}</h1>
+<form method="post" class="card form-grid">
+  {{ csrf() }}
+  <label>Название * <input type="text" name="name" value="{{ sw.name }}" required autofocus placeholder="Visual Studio Code"></label>
+  <label>Производитель <input type="text" name="vendor" value="{{ sw.vendor }}" placeholder="Microsoft"></label>
+  <label>Категория
+    <select name="category">
+      {% for k, v in CATEGORIES.items() %}<option value="{{ k }}" {{ 'selected' if (sw.category or 'other') == k }}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Тип лицензии
+    <select name="license_type">
+      {% for k, v in LICENSE_TYPES.items() %}<option value="{{ k }}" {{ 'selected' if (sw.license_type or 'free') == k }}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="wide">Сайт <input type="text" name="url" value="{{ sw.url }}" placeholder="https://code.visualstudio.com"></label>
+  <label class="wide">Примечание <textarea name="note" rows="2">{{ sw.note }}</textarea></label>
+  <div class="wide form-actions">
+    <button class="btn btn-primary">Сохранить</button>
+    <a class="btn btn-link" href="{{ url_for('software', sw_id=sw.id) if not is_new else url_for('software_list') }}">Отмена</a>
+  </div>
+</form>
+{% endblock %}

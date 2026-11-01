@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf %}
+{% block title %}Данные{% endblock %}
+{% block content %}
+<h1>Выгрузка и резервные копии</h1>
+
+<div class="grid-2">
+  <section class="card">
+    <h2>Отчёты</h2>
+    <ul class="link-list">
+      <li><a href="{{ url_for('export', kind='installations', fmt='xlsx') }}">Excel: весь реестр</a> <span class="muted small">листы «Установки», «Компьютеры», «Справочник ПО»</span></li>
+      <li><a href="{{ url_for('export', kind='computers', fmt='csv') }}">CSV: компьютеры</a></li>
+      <li><a href="{{ url_for('export', kind='software', fmt='csv') }}">CSV: справочник ПО</a></li>
+      <li><a href="{{ url_for('export', kind='installations', fmt='csv') }}">CSV: установки</a></li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Резервная копия</h2>
+    <p><a class="btn btn-primary" href="{{ url_for('backup') }}">Скачать копию (JSON)</a></p>
+    <p class="muted small">Сам файл базы лежит на сервере в <code>instance/registry.db</code>. Его тоже можно просто копировать.</p>
+
+    <h3>Восстановление</h3>
+    <form method="post" action="{{ url_for('restore') }}" enctype="multipart/form-data" class="stack"
+          data-confirm="Все текущие данные будут заменены данными из файла. Продолжить?">
+      {{ csrf() }}
+      <input type="file" name="file" accept=".json,application/json" required>
+      <label class="check"><input type="checkbox" name="confirm" value="1" required> Я понимаю, что текущие данные будут заменены</label>
+      <button class="btn btn-danger">Восстановить</button>
+    </form>
+  </section>
+</div>
+
+<section class="card" id="telegram" style="margin-top:16px">
+  <h2>Уведомления в Telegram</h2>
+  <p class="muted small">
+    Бот присылает сообщение о каждой новой заявке и каждом ответе пользователя.
+    {% if tg_token_tail and tg_chat %}<b class="ok-text">Включено.</b>{% else %}<b>Сейчас выключено.</b>{% endif %}
+  </p>
+  <ol class="small tg-steps">
+    <li>В Telegram откройте <b>@BotFather</b>, отправьте <code>/newbot</code> и скопируйте токен бота.</li>
+    <li>Напишите своему боту любое сообщение (или добавьте бота в группу, куда должны приходить заявки).</li>
+    <li>Вставьте токен ниже и нажмите «Найти chat id». Скопируйте нужный chat id в поле, нажмите «Проверить», затем «Сохранить».</li>
+  </ol>
+  <form method="post" action="{{ url_for('telegram_settings') }}" class="form-grid">
+    {{ csrf() }}
+    <label class="wide">Токен бота
+      <input type="password" name="token" autocomplete="off"
+             placeholder="{{ 'сохранён (…' ~ tg_token_tail ~ '), оставьте пустым, чтобы не менять' if tg_token_tail else '123456789:AA…' }}">
+    </label>
+    <label>Chat id <input type="text" name="chat" value="{{ tg_chat }}" placeholder="например 123456789 или -100…"></label>
+    <label>Адрес сайта для ссылок
+      <input type="text" name="site_url" value="{{ site_url }}" placeholder="https://academiatop-blg.ru">
+    </label>
+    <div class="wide form-actions">
+      <button class="btn btn-primary" name="action" value="save">Сохранить</button>
+      <button class="btn" name="action" value="chats">Найти chat id</button>
+      <button class="btn" name="action" value="test">Проверить</button>
+      {% if tg_token_tail %}
+      <label class="check"><input type="checkbox" name="clear" value="1"> отключить и удалить токен</label>
+      {% endif %}
+    </div>
+  </form>
+</section>
+{% endblock %}

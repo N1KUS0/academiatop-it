@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf, status_badge, delete_button %}
+{% block title %}{{ code }}{% endblock %}
+{% block content %}
+<nav class="crumbs"><a href="{{ url_for('auditoriums') }}">Аудитории</a> / {{ code }}</nav>
+<div class="page-head">
+  <h1>{{ code }} {% if aud.floor is not none %}<small class="muted">· {{ aud.floor }} этаж</small>{% endif %}</h1>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('ticket_new', kind='problem', auditorium=code) }}">Сообщить о проблеме</a>
+    <a class="btn" href="{{ url_for('ticket_new', kind='install', auditorium=code) }}">Запросить установку ПО</a>
+    {% if is_admin %}
+    <a class="btn btn-primary" href="{{ url_for('computer_new', aud=aud.id) }}">+ Компьютер</a>
+    {% endif %}
+  </div>
+</div>
+{% if aud.note %}<p>{{ aud.note }}</p>{% endif %}
+
+{% if open_tickets %}
+<div class="card similar">
+  <h3>Открытые заявки по этой аудитории</h3>
+  <ul>
+    {% for t in open_tickets %}
+    <li><a href="{{ url_for('ticket', ticket_id=t.id) }}">№{{ t.id }} {{ t.title }}</a>
+        <span class="muted small">{{ t.pc_link or 'вся аудитория' }} · {{ TICKET_STATUSES[t.status] }} · {{ t.author_name or t.author_username }}</span></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if computers %}
+<div class="table-wrap">
+<table class="table">
+  <thead><tr><th>Hostname</th><th>Инв. №</th><th>ОС</th><th>CPU / RAM / Диск</th><th>Статус</th><th class="num">ПО</th><th>Последняя установка</th></tr></thead>
+  <tbody>
+  {% for c in computers %}
+  <tr>
+    <td><a href="{{ url_for('computer', hostname=c.hostname) }}" class="mono strong">{{ c.hostname }}</a></td>
+    <td>{{ c.inv_number or '—' }}</td>
+    <td>{{ c.os }} {{ c.os_version }}</td>
+    <td class="small">{{ [c.cpu, c.ram, c.disk]|select|join(' · ') or '—' }}</td>
+    <td>{{ status_badge(c.status) }}</td>
+    <td class="num">{{ c.sw_count }}</td>
+    <td>{{ c.last_install|ru_date }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty">В аудитории пока нет компьютеров.</div>
+{% endif %}
+
+{% if is_admin %}
+<details class="card admin-box">
+  <summary>Настройки аудитории</summary>
+  <form method="post" action="{{ url_for('auditorium_edit', code=code) }}" class="form-row">
+    {{ csrf() }}
+    <label>Этаж <input type="number" name="floor" value="{{ aud.floor if aud.floor is not none }}" style="width:5em"></label>
+    <label class="grow">Примечание <input type="text" name="note" value="{{ aud.note }}"></label>
+    <button class="btn">Сохранить</button>
+  </form>
+  <div class="danger-zone">
+    {{ delete_button(url_for('auditorium_delete', code=code), 'Удалить аудиторию',
+       'Удалить аудиторию ' ~ code ~ '? Это можно сделать, только если в ней нет компьютеров.') }}
+  </div>
+</details>
+{% endif %}
+{% endblock %}

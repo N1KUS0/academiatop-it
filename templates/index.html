@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% from "macros.html" import cat_badge, ticket_badge, kind_badge %}
+{% block title %}Главная{% endblock %}
+{% block content %}
+{% set shown = open_tickets[:6] %}
+<section class="card home-tickets">
+  <div class="home-tickets-head">
+    <div>
+      <h2>Заявки</h2>
+      <p class="muted small">Что-то не работает или нужна программа? Сначала посмотрите открытые заявки ниже — возможно, о проблеме уже сообщили.</p>
+    </div>
+    <div class="home-tickets-actions">
+      <a class="btn btn-primary btn-lg" href="{{ url_for('ticket_new', kind='problem') }}">Сообщить о проблеме</a>
+      <a class="btn btn-lg" href="{{ url_for('ticket_new', kind='install') }}">Запросить установку ПО</a>
+    </div>
+  </div>
+
+  {% if shown %}
+  <table class="table compact home-tickets-table">
+    {% for t in shown %}
+    <tr class="{{ 'unread' if t.unread }}">
+      <td class="mono muted nowrap">№{{ t.id }}</td>
+      <td><a href="{{ url_for('ticket', ticket_id=t.id) }}" class="strong">{{ t.title }}</a>
+          {% if t.unread %}<span class="badge new-dot">новое</span>{% endif %}
+          <div class="muted small">{{ [t.pc_label, t.author_name or t.author_username]|select|join(' · ') }}{% if t.watchers > 1 %} · касается {{ t.watchers }}{% endif %}</div></td>
+      <td>{{ kind_badge(t.kind) }}</td>
+      <td class="num">{{ ticket_badge(t.status) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="small home-tickets-foot">
+    <a href="{{ url_for('tickets') }}">Все открытые заявки{% if open_tickets|length > shown|length %} ({{ open_tickets|length }}){% endif %} →</a>
+    {% if not is_admin %} · <a href="{{ url_for('tickets', mine=1) }}">Мои и отслеживаемые</a>{% endif %}
+  </p>
+  {% else %}
+  <p class="muted home-tickets-foot">Открытых заявок нет. <a href="{{ url_for('tickets', status='') }}">История заявок →</a></p>
+  {% endif %}
+</section>
+
+{% if is_admin and stats.computers == 0 %}
+<div class="card hint">
+  <h3>С чего начать</h3>
+  <ol>
+    <li>Откройте <a href="{{ url_for('auditoriums') }}">аудиторию</a> и добавьте компьютеры: имя вида <code>PC-01-03</code> получится само.</li>
+    <li>Заведите программы в <a href="{{ url_for('software_new') }}">справочнике ПО</a>.</li>
+    <li>Отметьте, на каких ПК они установлены: по одной на странице ПК или сразу на весь класс кнопкой «Массово отметить ПК».</li>
+  </ol>
+</div>
+{% endif %}
+
+<div class="stats">
+  <a class="stat" href="{{ url_for('auditoriums') }}"><b>{{ stats.auditoriums }}</b><span>аудиторий</span></a>
+  <a class="stat" href="{{ url_for('computers') }}"><b>{{ stats.computers }}</b><span>компьютеров</span></a>
+  <a class="stat" href="{{ url_for('software_list') }}"><b>{{ stats.software }}</b><span>программ в справочнике</span></a>
+  <div class="stat"><b>{{ stats.installations }}</b><span>установок</span></div>
+</div>
+
+{% if last_import %}
+<p class="import-status small">
+  Последняя автовыгрузка: <b>{{ last_import.created_at[:16] }}</b>
+  {% if last_import.ok %}<span class="badge status-active">OK</span>{% else %}<span class="badge lic-commercial">ошибка</span>{% endif %}
+  {% if is_admin %}· <a href="{{ url_for('import_page') }}">подробнее</a>{% endif %}
+</p>
+{% endif %}
+
+<section class="card">
+  <h2>Аудитории</h2>
+  <div class="aud-chips">
+    {% for a in auditoriums %}
+      <a class="aud-chip" href="{{ url_for('auditorium', code='AUD-' ~ a.num) }}">
+        <b>AUD-{{ a.num }}</b><span>{{ a.pc_count }} ПК</span>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+
+<div class="grid-2">
+  <section class="card">
+    <h2>Самое распространённое ПО</h2>
+    {% if top %}
+    <table class="table compact">
+      {% for s in top %}
+      <tr>
+        <td><a href="{{ url_for('software', sw_id=s.id) }}">{{ s.name }}</a></td>
+        <td>{{ cat_badge(s.category) }}</td>
+        <td class="num">{{ s.cnt }} ПК</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="muted">Установок пока нет.</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Последние установки</h2>
+    {% if recent %}
+    <table class="table compact">
+      {% for r in recent %}
+      {% set host = pc_hostname(r.aud_num, r.pc_num) %}
+      <tr>
+        <td class="nowrap">{{ r.installed_at|ru_date }}</td>
+        <td><a href="{{ url_for('computer', hostname=host) }}" class="mono">{{ host }}</a></td>
+        <td><a href="{{ url_for('software', sw_id=r.software_id) }}">{{ r.sw_name }}</a> <span class="muted">{{ r.version }}</span></td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="muted">Нет установок с указанной датой.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf %}
+{% block title %}Массовая отметка — {{ sw.name }}{% endblock %}
+{% block content %}
+<nav class="crumbs"><a href="{{ url_for('software_list') }}">Справочник ПО</a> / <a href="{{ url_for('software', sw_id=sw.id) }}">{{ sw.name }}</a> / массовая отметка</nav>
+<h1>На каких ПК установлен «{{ sw.name }}»</h1>
+<p class="muted">Отметьте компьютеры галочками. Уже отмеченные ПК выделены. Чтобы выбрать всю аудиторию, нажмите на её название.</p>
+
+<form method="post" class="bulk-form">
+  {{ csrf() }}
+  <div class="card form-row">
+    <label>Версия <input type="text" name="version" style="width:9em"></label>
+    <label>Дата установки <input type="date" name="installed_at" value="{{ today }}"></label>
+    <label class="check"><input type="checkbox" name="overwrite" value="1"> обновить версию и дату у уже отмеченных ПК</label>
+    <label class="check"><input type="checkbox" name="remove_unchecked" value="1"> убрать программу с ПК, где снята галочка</label>
+  </div>
+
+  {% for code, pcs in groups.items() %}
+  <fieldset class="card bulk-group">
+    <legend>
+      <label class="check strong"><input type="checkbox" data-check-all="{{ code }}"> {{ code }}</label>
+      <span class="muted small">{{ pcs|length }} ПК</span>
+    </legend>
+    <div class="bulk-pcs">
+      {% for pc in pcs %}
+      {% set inst = existing.get(pc.id) %}
+      <label class="pc-check {{ 'has' if inst }} status-{{ pc.status }}">
+        <input type="checkbox" name="pc" value="{{ pc.id }}" data-group="{{ code }}" {{ 'checked' if inst }}>
+        <span class="mono">{{ pc.hostname }}</span>
+        {% if inst %}<small>{{ inst.version or 'уст.' }}</small>{% endif %}
+      </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+  {% else %}
+  <div class="card empty">Сначала добавьте компьютеры в аудитории.</div>
+  {% endfor %}
+
+  <div class="sticky-actions">
+    <span id="bulk-count" class="muted"></span>
+    <button class="btn btn-primary">Сохранить</button>
+    <a class="btn btn-link" href="{{ url_for('software', sw_id=sw.id) }}">Отмена</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "macros.html" import status_badge %}
+{% block title %}Поиск{% endblock %}
+{% block content %}
+<h1>Поиск по установкам</h1>
+
+<form class="card filters" method="get">
+  <label>Компьютеры, где
+    <select name="mode">
+      <option value="has" {{ 'selected' if mode == 'has' }}>установлено</option>
+      <option value="missing" {{ 'selected' if mode == 'missing' }}>НЕ установлено</option>
+    </select>
+  </label>
+  <label class="grow">Программа
+    <input type="text" name="software" value="{{ sw_name }}" list="sw-names" required autocomplete="off" placeholder="например, Python">
+    <datalist id="sw-names">{% for n in sw_names %}<option value="{{ n }}">{% endfor %}</datalist>
+  </label>
+  <label>Версия начинается с
+    <input type="text" name="version" value="{{ version }}" placeholder="3.12" style="width:7em">
+  </label>
+  <label>Аудитория
+    <select name="aud">
+      <option value="">Все</option>
+      {% for a in auditoriums %}<option value="AUD-{{ a.num }}" {{ 'selected' if aud == 'AUD-' ~ a.num }}>AUD-{{ a.num }}</option>{% endfor %}
+    </select>
+  </label>
+  <button class="btn btn-primary">Найти</button>
+</form>
+
+{% if results is not none %}
+<h2>
+  {{ 'Установлено' if mode == 'has' else 'НЕ установлено' }}:
+  <a href="{{ url_for('software', sw_id=sw.id) }}">{{ sw.name }}</a>{% if version and mode == 'has' %} {{ version }}*{% endif %}
+  <small class="muted">— {{ results|length }} ПК</small>
+</h2>
+{% if results %}
+<div class="table-wrap">
+<table class="table">
+  <thead><tr><th>Hostname</th><th>Аудитория</th><th>ОС</th><th>Статус</th>{% if mode == 'has' %}<th>Версия</th>{% else %}<th>Есть другая версия?</th>{% endif %}</tr></thead>
+  <tbody>
+  {% for c in results %}
+  <tr>
+    <td><a href="{{ url_for('computer', hostname=c.hostname) }}" class="mono strong">{{ c.hostname }}</a></td>
+    <td>{{ c.aud_code }}</td>
+    <td>{{ c.os }} {{ c.os_version }}</td>
+    <td>{{ status_badge(c.status) }}</td>
+    <td class="mono">{{ c.sw_version if c.sw_version is not none else '—' }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty">Подходящих компьютеров нет.</div>
+{% endif %}
+{% endif %}
+{% endblock %}

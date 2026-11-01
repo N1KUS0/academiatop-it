@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf %}
+{% block title %}Импорт{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Импорт автовыгрузки</h1>
+  <div class="actions">
+    {% if has_last %}
+    <form method="post" action="{{ url_for('import_rerun') }}" class="inline">
+      {{ csrf() }}<button class="btn" title="Применить последний полученный архив ещё раз">Повторить последний импорт</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid-2">
+  <section class="card">
+    <h2>Загрузить вручную</h2>
+    <form method="post" action="{{ url_for('import_upload') }}" enctype="multipart/form-data" class="stack">
+      {{ csrf() }}
+      <input type="file" name="file" accept=".zip,application/zip" required>
+      <button class="btn btn-primary">Импортировать</button>
+    </form>
+    <p class="muted small">Архив <code>inventory_latest.zip</code> с файлами <code>computers.csv</code> и <code>software_raw.csv</code>.
+      Обновляются только ПК из архива; программы, внесённые вручную, не удаляются.</p>
+  </section>
+
+  <section class="card" id="token">
+    <h2>Автоматическая отправка</h2>
+    {% if new_token %}
+      <div class="flash flash-warning">
+        Новый токен (показывается один раз — сохраните его в скрипте отправки):
+        <div class="token-box mono">{{ new_token }}</div>
+      </div>
+    {% elif has_token %}
+      <p>Токен задан. Ежедневная выгрузка отправляется на <code>{{ request.host_url }}api/inventory</code>.</p>
+    {% else %}
+      <p class="muted">Токен ещё не создан — автоматическая отправка не работает.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('import_token') }}"
+          {% if has_token %}data-confirm="Создать новый токен? Старый перестанет работать, его нужно будет заменить в скрипте отправки."{% endif %}>
+      {{ csrf() }}<button class="btn">{{ 'Создать новый токен' if has_token else 'Создать токен' }}</button>
+    </form>
+  </section>
+</div>
+
+<h2 id="unknown">Нераспознанные программы <small class="muted">{{ unknown|length }}</small></h2>
+{% if unknown %}
+<p class="muted small">Этих названий нет в правилах. Сопоставьте с программой из справочника (можно ввести новое название)
+  или отметьте «Игнорировать» — решение запомнится для следующих выгрузок, в том числе для других версий.</p>
+<datalist id="sw-names">{% for n in sw_names %}<option value="{{ n }}">{% endfor %}</datalist>
+<div class="table-wrap">
+<table class="table">
+  <thead><tr><th>Название в выгрузке</th><th>Издатель</th><th>Версии</th><th>ПК</th><th>Решение</th></tr></thead>
+  <tbody>
+  {% for u in unknown %}
+  {% set hosts = u.hosts.split(', ') %}
+  <tr>
+    <td class="strong">{{ u.name }}</td>
+    <td class="small">{{ u.publisher or '—' }}</td>
+    <td class="small mono">{{ u.versions or '—' }}</td>
+    <td class="small" title="{{ u.hosts }}">{{ hosts|length }}{% if hosts|length <= 3 %}: {{ u.hosts }}{% endif %}</td>
+    <td>
+      <form method="post" action="{{ url_for('import_alias') }}" class="alias-form">
+        {{ csrf() }}<input type="hidden" name="raw_key" value="{{ u.raw_key }}">
+        <input type="text" name="software" list="sw-names" placeholder="программа…" autocomplete="off">
+        <button class="btn btn-sm btn-primary" name="action" value="map">Сопоставить</button>
+        <button class="btn btn-sm" name="action" value="ignore" formnovalidate>Игнорировать</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty">Все программы из последней выгрузки распознаны.</div>
+{% endif %}
+
+<h2>Журнал импортов</h2>
+{% if imports %}
+<div class="table-wrap">
+<table class="table">
+  <thead><tr><th>Когда</th><th>Откуда</th><th>Результат</th></tr></thead>
+  <tbody>
+  {% for i in imports %}
+  <tr>
+    <td class="nowrap">{{ i.created_at }}</td>
+    <td class="nowrap">{{ {'api': 'автоотправка', 'upload': 'загружен вручную', 'cli': 'с сервера', 'rerun': 'повтор'}.get(i.origin, i.origin) }}</td>
+    <td class="small">
+      {% if i.ok %}<span class="badge status-active">OK</span>{% else %}<span class="badge lic-commercial">Ошибка</span>{% endif %}
+      {{ i.message }}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty">Импортов ещё не было.</div>
+{% endif %}
+
+{% if aliases %}
+<h2 id="aliases">Ваши сопоставления <small class="muted">{{ aliases|length }}</small></h2>
+<div class="table-wrap">
+<table class="table compact">
+  <thead><tr><th>Название в выгрузке</th><th>Решение</th><th></th></tr></thead>
+  <tbody>
+  {% for a in aliases %}
+  <tr>
+    <td>{{ a.sample_name }}</td>
+    <td>{% if a.sw_name %}→ {{ a.sw_name }}{% else %}<span class="muted">игнорируется</span>{% endif %}</td>
+    <td class="row-actions">
+      <form method="post" action="{{ url_for('import_alias_delete') }}" class="inline" data-confirm="Удалить сопоставление?">
+        {{ csrf() }}<input type="hidden" name="raw_key" value="{{ a.raw_key }}">
+        <button class="btn btn-sm btn-danger">✕</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

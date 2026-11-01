@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "macros.html" import cat_badge, lic_badge, status_badge, delete_button %}
+{% block title %}{{ sw.name }}{% endblock %}
+{% block content %}
+<nav class="crumbs"><a href="{{ url_for('software_list') }}">Справочник ПО</a> / {{ sw.name }}</nav>
+<div class="page-head">
+  <h1>{{ sw.name }}</h1>
+  {% if is_admin %}
+  <div class="actions">
+    <a class="btn btn-primary" href="{{ url_for('software_bulk', sw_id=sw.id) }}">Массово отметить ПК</a>
+    <a class="btn" href="{{ url_for('software_edit', sw_id=sw.id) }}">Изменить</a>
+  </div>
+  {% endif %}
+</div>
+
+<dl class="card specs">
+  <div><dt>Производитель</dt><dd>{{ sw.vendor or '—' }}</dd></div>
+  <div><dt>Категория</dt><dd>{{ cat_badge(sw.category) }}</dd></div>
+  <div><dt>Лицензия</dt><dd>{{ lic_badge(sw.license_type) }}</dd></div>
+  <div><dt>Сайт</dt><dd>{% if sw.url %}<a href="{{ sw.url }}" target="_blank" rel="noopener noreferrer">{{ sw.url|replace('https://','')|replace('http://','') }}</a>{% else %}—{% endif %}</dd></div>
+  {% if sw.note %}<div class="wide"><dt>Примечание</dt><dd>{{ sw.note }}</dd></div>{% endif %}
+</dl>
+
+<h2>Установлено на {{ installs|length }} ПК</h2>
+{% if versions|length > 1 %}
+<div class="versions">
+  Версии:
+  {% for v, n in versions %}<span class="badge">{{ v }} — {{ n }}</span>{% endfor %}
+</div>
+{% endif %}
+
+{% for code, rows in by_aud.items() %}
+<section class="card">
+  <h3><a href="{{ url_for('auditorium', code=code) }}">{{ code }}</a> <small class="muted">{{ rows|length }} ПК</small></h3>
+  <table class="table compact">
+    {% for r in rows %}
+    <tr>
+      <td><a href="{{ url_for('computer', hostname=r.hostname) }}" class="mono strong">{{ r.hostname }}</a></td>
+      <td class="mono">{{ r.version or '—' }}</td>
+      <td class="nowrap">{{ r.installed_at|ru_date }}</td>
+      <td>{% if r.status != 'active' %}{{ status_badge(r.status) }}{% endif %}</td>
+      <td class="small">{{ r.note }}</td>
+      {% if is_admin %}<td class="row-actions"><a class="btn btn-sm" href="{{ url_for('installation_edit', inst_id=r.id, back=request.path) }}">Изм.</a></td>{% endif %}
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% else %}
+<div class="card empty">Эта программа пока не отмечена ни на одном ПК.</div>
+{% endfor %}
+
+{% if is_admin %}
+<div class="danger-zone">
+  {{ delete_button(url_for('software_delete', sw_id=sw.id), 'Удалить из справочника',
+     'Удалить «' ~ sw.name ~ '» из справочника? Записи об установке на всех ПК (' ~ installs|length ~ ') тоже удалятся.') }}
+</div>
+{% endif %}
+{% endblock %}

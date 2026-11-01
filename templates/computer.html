@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf, status_badge, cat_badge, lic_badge, delete_button %}
+{% block title %}{{ pc.hostname }}{% endblock %}
+{% block content %}
+<nav class="crumbs">
+  <a href="{{ url_for('auditoriums') }}">Аудитории</a> /
+  <a href="{{ url_for('auditorium', code=pc.aud_code) }}">{{ pc.aud_code }}</a> / {{ pc.hostname }}
+</nav>
+<div class="page-head">
+  <h1 class="mono">{{ pc.hostname }} {{ status_badge(pc.status) }}</h1>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('ticket_new', kind='problem', computer=pc.hostname) }}">Сообщить о проблеме</a>
+    <a class="btn" href="{{ url_for('ticket_new', kind='install', computer=pc.hostname) }}">Запросить установку ПО</a>
+    {% if is_admin %}
+    <a class="btn" href="{{ url_for('computer_edit', hostname=pc.hostname) }}">Изменить</a>
+    <a class="btn" href="{{ url_for('computer_new', copy=pc.hostname) }}" title="Создать следующий ПК с такими же характеристиками">Копировать</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if open_tickets %}
+<div class="card similar">
+  <h3>Открытые заявки по этому компьютеру</h3>
+  <ul>
+    {% for t in open_tickets %}
+    <li><a href="{{ url_for('ticket', ticket_id=t.id) }}">№{{ t.id }} {{ t.title }}</a>
+        <span class="muted small">{{ TICKET_STATUSES[t.status] }} · {{ t.author_name or t.author_username }}</span></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<dl class="card specs">
+  <div><dt>Аудитория</dt><dd><a href="{{ url_for('auditorium', code=pc.aud_code) }}">{{ pc.aud_code }}</a></dd></div>
+  <div><dt>Инв. номер</dt><dd>{{ pc.inv_number or '—' }}</dd></div>
+  <div><dt>ОС</dt><dd>{{ pc.os or '—' }} {{ pc.os_version }}</dd></div>
+  <div><dt>Процессор</dt><dd>{{ pc.cpu or '—' }}</dd></div>
+  <div><dt>ОЗУ</dt><dd>{{ pc.ram or '—' }}</dd></div>
+  <div><dt>Диск</dt><dd>{{ pc.disk or '—' }}</dd></div>
+  {% if pc.note %}<div class="wide"><dt>Примечание</dt><dd>{{ pc.note }}</dd></div>{% endif %}
+</dl>
+
+<h2>Установленное ПО <small class="muted">{{ installs|length }}</small></h2>
+
+{% if is_admin %}
+<form method="post" action="{{ url_for('computer_install', hostname=pc.hostname) }}" class="card form-row add-install">
+  {{ csrf() }}
+  <label class="grow">Программа
+    <input type="text" name="software" list="sw-names" required autocomplete="off" placeholder="начните вводить…" autofocus>
+  </label>
+  <label>Версия <input type="text" name="version" style="width:8em"></label>
+  <label>Дата установки <input type="date" name="installed_at" value="{{ today }}"></label>
+  <label class="grow">Примечание <input type="text" name="note"></label>
+  <button class="btn btn-primary">Добавить</button>
+  <datalist id="sw-names">{% for n in sw_names %}<option value="{{ n }}">{% endfor %}</datalist>
+</form>
+{% endif %}
+
+{% if installs %}
+<div class="table-wrap">
+<table class="table" id="sw-table">
+  <thead><tr><th>Программа</th><th>Категория</th><th>Лицензия</th><th>Версия</th><th>Установлено</th><th>Примечание</th>{% if is_admin %}<th></th>{% endif %}</tr></thead>
+  <tbody>
+  {% for i in installs %}
+  <tr>
+    <td><a href="{{ url_for('software', sw_id=i.software_id) }}" class="strong">{{ i.name }}</a>
+        {% if i.vendor %}<div class="muted small">{{ i.vendor }}</div>{% endif %}</td>
+    <td>{{ cat_badge(i.category) }}</td>
+    <td>{{ lic_badge(i.license_type) }}</td>
+    <td class="mono">{{ i.version or '—' }}</td>
+    <td class="nowrap">{{ i.installed_at|ru_date }}</td>
+    <td class="small">{{ i.note }}</td>
+    {% if is_admin %}
+    <td class="row-actions">
+      <a class="btn btn-sm" href="{{ url_for('installation_edit', inst_id=i.id, back=request.path) }}">Изм.</a>
+      {{ delete_button(url_for('installation_delete', inst_id=i.id), '✕',
+         'Убрать «' ~ i.name ~ '» с ' ~ pc.hostname ~ '?',
+         ('<input type="hidden" name="back" value="' ~ request.path ~ '">')|safe) }}
+    </td>
+    {% endif %}
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty">На этом компьютере пока не отмечено ни одной программы.</div>
+{% endif %}
+
+{% if is_admin %}
+<div class="danger-zone">
+  {{ delete_button(url_for('computer_delete', hostname=pc.hostname), 'Удалить компьютер',
+     'Удалить ' ~ pc.hostname ~ ' и весь список его ПО? Это нельзя отменить.') }}
+</div>
+{% endif %}
+{% endblock %}

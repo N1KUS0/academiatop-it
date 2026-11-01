@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf %}
+{% block title %}Установка{% endblock %}
+{% block content %}
+<h1>{{ inst.name }} на <span class="mono">{{ hostname }}</span></h1>
+<form method="post" class="card form-grid">
+  {{ csrf() }}
+  <input type="hidden" name="back" value="{{ back }}">
+  <label>Версия <input type="text" name="version" value="{{ inst.version }}" autofocus></label>
+  <label>Дата установки <input type="date" name="installed_at" value="{{ inst.installed_at }}"></label>
+  <label class="wide">Примечание <input type="text" name="note" value="{{ inst.note }}"></label>
+  <div class="wide form-actions">
+    <button class="btn btn-primary">Сохранить</button>
+    <a class="btn btn-link" href="{{ back }}">Отмена</a>
+  </div>
+</form>
+{% endblock %}

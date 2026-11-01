@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf, delete_button %}
+{% block title %}Пользователи{% endblock %}
+{% block content %}
+<h1>Пользователи</h1>
+<p class="muted">Пользователи могут просматривать данные, создавать заявки и скачивать выгрузки. Редактирует только администратор.</p>
+
+<section class="card">
+  <h2>Новый пользователь</h2>
+  <form method="post" action="{{ url_for('user_new') }}" class="form-row">
+    {{ csrf() }}
+    <label>Логин <input type="text" name="username" required maxlength="50" autocomplete="off"></label>
+    <label class="grow">ФИО / должность <input type="text" name="full_name" maxlength="200"></label>
+    <label>Пароль <input type="text" name="password" required minlength="{{ min_len }}" autocomplete="new-password"
+                         placeholder="не короче {{ min_len }} символов"></label>
+    <button class="btn btn-primary">Создать</button>
+  </form>
+</section>
+
+{% if users %}
+<div class="table-wrap">
+  <table class="table">
+    <thead><tr><th>Логин</th><th>ФИО / должность</th><th>Создан</th><th>Последний вход</th><th>Новый пароль</th><th></th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr>
+        <td><strong>{{ u.username }}</strong></td>
+        <td>{{ u.full_name or '—' }}</td>
+        <td>{{ u.created_at | ru_date }}</td>
+        <td>{{ u.last_login or 'ещё не входил' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('user_password', user_id=u.id) }}" class="inline">
+            {{ csrf() }}
+            <input type="text" name="password" required minlength="{{ min_len }}" autocomplete="new-password"
+                   placeholder="новый пароль" style="width: 160px">
+            <button class="btn btn-sm">Сменить</button>
+          </form>
+        </td>
+        <td class="num">{{ delete_button(url_for('user_delete', user_id=u.id), 'Удалить',
+                                       'Удалить пользователя ' ~ u.username ~ '?') }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted">Пользователей пока нет.</p>
+{% endif %}
+{% endblock %}

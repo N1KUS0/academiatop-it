@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "macros.html" import status_badge %}
+{% block title %}Компьютеры{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Компьютеры <small class="muted">{{ computers|length }}</small></h1>
+  <div class="actions">
+    {% if is_admin %}<a class="btn btn-primary" href="{{ url_for('computer_new') }}">+ Компьютер</a>{% endif %}
+    <a class="btn" href="{{ url_for('export', kind='computers', fmt='xlsx') }}">Excel</a>
+  </div>
+</div>
+
+<form class="card filters" method="get">
+  <label>Аудитория
+    <select name="aud" onchange="this.form.submit()">
+      <option value="">Все</option>
+      {% for a in auditoriums %}<option value="AUD-{{ a.num }}" {{ 'selected' if aud == 'AUD-' ~ a.num }}>AUD-{{ a.num }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Статус
+    <select name="status" onchange="this.form.submit()">
+      <option value="">Любой</option>
+      {% for k, v in STATUSES.items() %}<option value="{{ k }}" {{ 'selected' if status == k }}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="grow">Быстрый фильтр
+    <input type="search" data-filter-table="pc-table" placeholder="hostname, ОС, инв. номер…">
+  </label>
+</form>
+
+{% if computers %}
+<div class="table-wrap">
+<table class="table" id="pc-table">
+  <thead><tr><th>Hostname</th><th>Аудитория</th><th>Инв. №</th><th>ОС</th><th>CPU / RAM / Диск</th><th>Статус</th><th class="num">ПО</th></tr></thead>
+  <tbody>
+  {% for c in computers %}
+  <tr>
+    <td><a href="{{ url_for('computer', hostname=c.hostname) }}" class="mono strong">{{ c.hostname }}</a></td>
+    <td><a href="{{ url_for('auditorium', code=c.aud_code) }}">{{ c.aud_code }}</a></td>
+    <td>{{ c.inv_number or '—' }}</td>
+    <td>{{ c.os }} {{ c.os_version }}</td>
+    <td class="small">{{ [c.cpu, c.ram, c.disk]|select|join(' · ') or '—' }}</td>
+    <td>{{ status_badge(c.status) }}</td>
+    <td class="num">{{ c.sw_count }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty">Компьютеров не найдено.</div>
+{% endif %}
+{% endblock %}

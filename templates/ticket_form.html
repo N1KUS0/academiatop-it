@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf %}
+{% block title %}Новая заявка{% endblock %}
+{% block content %}
+<nav class="crumbs"><a href="{{ url_for('tickets') }}">Заявки</a> / новая</nav>
+<h1>Новая заявка</h1>
+
+<form method="post" action="{{ url_for('ticket_new') }}" class="card form-grid" id="ticket-form">
+  {{ csrf() }}
+  <div class="wide kind-switch">
+    {% for k, v in TICKET_KINDS.items() %}
+    <label class="check"><input type="radio" name="kind" value="{{ k }}" {{ 'checked' if form.kind == k }}> {{ v }}</label>
+    {% endfor %}
+  </div>
+
+  <label>Аудитория <span class="muted small">если касается всей аудитории</span>
+    <select name="auditorium" id="ticket-aud">
+      <option value="">— не указана —</option>
+      {% for a in auditoriums %}{% set code = 'AUD-' ~ a.num %}
+      <option value="{{ code }}" {{ 'selected' if form.auditorium|upper == code }}>{{ code }}{% if a.note %} · {{ a.note }}{% endif %}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Компьютер <span class="muted small">необязательно, если проблема на одном ПК</span>
+    <input type="text" name="computer" list="pc-names" value="{{ form.computer }}" placeholder="PC-01-03" autocomplete="off">
+  </label>
+  <label class="wide" data-kind="install">Какую программу установить
+    <input type="text" name="software" list="sw-names" value="{{ form.software }}" placeholder="название программы" autocomplete="off">
+  </label>
+
+  <label class="wide">Тема
+    <input type="text" name="title" value="{{ form.title }}" maxlength="200"
+           placeholder="коротко: «Не запускается Visual Studio», «Нет звука»…">
+  </label>
+  <label class="wide">Подробности
+    <textarea name="body" rows="6" maxlength="5000" placeholder="Что случилось, когда, какая ошибка на экране. Для установки — какая версия нужна и к какому занятию.">{{ form.body }}</textarea>
+  </label>
+  <div class="wide card similar" id="similar-box" hidden data-url="{{ url_for('tickets_similar') }}">
+    <h3>Возможно, такая заявка уже есть</h3>
+    <p class="small" style="margin:0 0 6px">Если это ваш случай — откройте её и нажмите «Меня тоже касается» вместо новой заявки.</p>
+    <ul></ul>
+  </div>
+  <p class="wide muted small" data-kind="install">Тему для заявки на установку можно не заполнять — она составится сама.</p>
+
+  <div class="wide form-actions">
+    <button class="btn btn-primary">Отправить</button>
+    <a class="btn btn-link" href="{{ url_for('tickets') }}">Отмена</a>
+  </div>
+  <datalist id="pc-names">{% for c in computers %}<option value="{{ c.hostname }}" data-aud="{{ c.aud_code }}">{% endfor %}</datalist>
+  <datalist id="sw-names">{% for n in sw_names %}<option value="{{ n }}">{% endfor %}</datalist>
+</form>
+{% endblock %}

@@ -1,0 +1,21 @@
+[Unit]
+Description=Академия ТОП — IT-портал (by n1kuso)
+After=network.target
+
+[Service]
+User=registry
+Group=registry
+WorkingDirectory=/opt/registry
+Environment=REGISTRY_DB=/opt/registry/instance/registry.db
+ExecStart=/opt/registry/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:8000 --access-logfile - app:app
+Restart=on-failure
+
+# Защита: сервис может писать только в каталог с базой
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/registry/instance
+
+[Install]
+WantedBy=multi-user.target
