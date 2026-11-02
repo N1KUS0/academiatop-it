@@ -158,23 +158,111 @@ document.querySelectorAll("[data-filter-table]").forEach(function (input) {
   refresh();
 })();
 
-// Фото к заявке: сразу предупредить, если файлов слишком много или они слишком большие
-// (сервер всё равно проверит, но большой запрос nginx отклонит целиком, без понятного сообщения).
+// Фото к заявке и ответу: выбрать файлом, вставить из буфера (Ctrl+V) или перетащить в форму.
+// Выбранные фото видны миниатюрами, лишнее можно убрать. Слишком много или слишком большие — сразу
+// предупредить (сервер всё равно проверит, но большой запрос nginx отклонит целиком, без понятного сообщения).
 document.querySelectorAll('input[type=file][name="photos"]').forEach(function (input) {
   var MAX_FILE = 10 * 1024 * 1024, MAX_TOTAL = 18 * 1024 * 1024;
-  input.addEventListener("change", function () {
-    var files = Array.prototype.slice.call(input.files);
-    var max = parseInt(input.dataset.maxFiles, 10) || 3;
-    var total = files.reduce(function (s, f) { return s + f.size; }, 0);
-    var big = files.filter(function (f) { return f.size > MAX_FILE; })[0];
-    var error = files.length > max ? "Можно приложить не больше " + max + " фото."
+  var max = parseInt(input.dataset.maxFiles, 10) || 3;
+  var form = input.form;
+  var label = input.closest("label");
+  var files = [];
+  var canSet = true;  // можно ли подменять список файлов поля (во всех современных браузерах)
+  try { new DataTransfer(); } catch (e) { canSet = false; }
+
+  var preview = document.createElement("div");
+  preview.className = "photo-preview";
+  (label || input).insertAdjacentElement("afterend", preview);
+
+  function check(list) {
+    var total = list.reduce(function (s, f) { return s + f.size; }, 0);
+    var big = list.filter(function (f) { return f.size > MAX_FILE; })[0];
+    return list.length > max ? "Можно приложить не больше " + max + " фото."
       : big ? "Фото «" + big.name + "» больше 10 МБ."
       : total > MAX_TOTAL ? "Фото вместе больше 18 МБ — выберите меньше или поменьше."
       : "";
-    if (error) {
-      alert(error);
-      input.value = "";
+  }
+  function apply(list) {
+    files = list;
+    if (canSet) {
+      var dt = new DataTransfer();
+      files.forEach(function (f) { dt.items.add(f); });
+      input.files = dt.files;
     }
+    render();
+  }
+  function add(newFiles) {
+    var list = files.concat(newFiles);
+    var error = check(list);
+    if (error) { alert(error); apply(files); return; }
+    apply(list);
+  }
+  function render() {
+    preview.textContent = "";
+    files.forEach(function (f, i) {
+      var item = document.createElement("span");
+      item.className = "photo-thumb";
+      var img = document.createElement("img");
+      img.src = URL.createObjectURL(f);
+      img.alt = f.name;
+      img.onload = function () { URL.revokeObjectURL(img.src); };
+      var del = document.createElement("button");
+      del.type = "button";
+      del.textContent = "×";
+      del.title = "Убрать фото";
+      del.addEventListener("click", function () {
+        apply(files.filter(function (_, j) { return j !== i; }));
+      });
+      item.appendChild(img);
+      item.appendChild(del);
+      preview.appendChild(item);
+    });
+  }
+  // Картинки из буфера или перетаскивания; имя «Снимок экрана N», иначе все называются image.png.
+  function images(list) {
+    return Array.prototype.filter.call(list || [], function (f) { return /^image\//.test(f.type); })
+      .map(function (f, i) {
+        if (f.name && f.name !== "image.png") return f;
+        var ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg");
+        return new File([f], "Снимок экрана " + (files.length + i + 1) + "." + ext, { type: f.type });
+      });
+  }
+
+  input.addEventListener("change", function () {
+    if (!canSet) {  // старый браузер: работает только обычный выбор файлов
+      var error = check(Array.prototype.slice.call(input.files));
+      if (error) { alert(error); input.value = ""; }
+      return;
+    }
+    add(Array.prototype.slice.call(input.files).filter(function (f) { return files.indexOf(f) === -1; }));
+  });
+  if (!canSet || !form) return;
+
+  form.addEventListener("paste", function (e) {
+    var data = e.clipboardData;
+    if (!data) return;
+    // Если в буфере есть текст (например, ячейки из Excel — там ещё и картинка), вставляем текст как обычно.
+    if ((data.getData("text/plain") || "").trim()) return;
+    var pasted = images(data.files);
+    if (!pasted.length) return;
+    e.preventDefault();
+    add(pasted);
+  });
+  form.addEventListener("dragover", function (e) {
+    if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types, "Files") !== -1) {
+      e.preventDefault();
+      form.classList.add("drop-target");
+    }
+  });
+  form.addEventListener("dragleave", function (e) {
+    if (!form.contains(e.relatedTarget)) form.classList.remove("drop-target");
+  });
+  form.addEventListener("drop", function (e) {
+    form.classList.remove("drop-target");
+    var dropped = images(e.dataTransfer && e.dataTransfer.files);
+    if (!dropped.length) return;
+    e.preventDefault();
+    add(dropped);
   });
 });
 
