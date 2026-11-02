@@ -177,3 +177,36 @@ document.querySelectorAll('input[type=file][name="photos"]').forEach(function (i
     }
   });
 });
+
+// Кнопка «глазик» у полей пароля: показать введённое, чтобы не ошибиться
+document.querySelectorAll('input[type="password"]').forEach(function (input) {
+  var EYE = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/>' +
+            '<circle cx="12" cy="12" r="3"/>';
+  var ICON_SHOW = EYE + '</svg>';
+  var ICON_HIDE = EYE + '<path d="M3 3l18 18"/></svg>';
+  var wrap = document.createElement("span");
+  wrap.className = "pw-wrap";
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+  var btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "pw-toggle";
+  function render() {
+    var shown = input.type === "text";
+    btn.innerHTML = shown ? ICON_HIDE : ICON_SHOW;
+    btn.title = shown ? "Скрыть пароль" : "Показать пароль";
+    btn.setAttribute("aria-label", btn.title);
+    btn.setAttribute("aria-pressed", shown ? "true" : "false");
+  }
+  btn.addEventListener("click", function (e) {
+    e.preventDefault();
+    input.type = input.type === "password" ? "text" : "password";
+    render();
+    input.focus();
+  });
+  // Перед отправкой — снова скрыть, чтобы браузер сохранял пароль как пароль.
+  if (input.form) input.form.addEventListener("submit", function () { input.type = "password"; });
+  wrap.appendChild(btn);
+  render();
+});

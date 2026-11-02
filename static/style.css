@@ -375,3 +375,13 @@ form.inline { display: inline; margin: 0; }
   .ticket-table .t-watch { display: none; }
   .ticket-table .t-where::before { content: "Где: "; color: var(--muted); font-family: "Segoe UI", Roboto, sans-serif; }
 }
+
+/* ---------- показать пароль ---------- */
+.pw-wrap { position: relative; display: block; }
+.pw-wrap input { width: 100%; padding-right: 40px; }
+.pw-wrap input::-ms-reveal { display: none; }  /* у Edge свой «глазик» — оставляем один */
+.pw-toggle {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  border: 0; background: none; padding: 6px; line-height: 0; color: var(--muted); cursor: pointer; border-radius: 6px;
+}
+.pw-toggle:hover, .pw-toggle[aria-pressed="true"] { color: var(--ink); }
