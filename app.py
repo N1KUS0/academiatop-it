@@ -95,7 +95,7 @@ MIN_PASSWORD_LEN = 6
 # Администратор может менять и удалять данные, поэтому его пароль длиннее.
 ADMIN_MIN_PASSWORD_LEN = 12
 # Страницы, доступные без входа. API импорта авторизуется своим токеном.
-PUBLIC_ENDPOINTS = {"login", "logout", "static", "api_inventory", "robots"}
+PUBLIC_ENDPOINTS = {"login", "logout", "forgot_password", "static", "api_inventory", "robots"}
 
 
 def password_marker(pw_hash=None):
@@ -122,7 +122,8 @@ def current_user():
             # Удалённый пользователь или сменённый пароль — сессия больше не действует.
             if row and session.get("pwm") == password_marker(row["password_hash"]):
                 g._user = dict(id=row["id"], username=row["username"],
-                               name=row["full_name"] or row["username"], admin=False, avatar=row["avatar"])
+                               name=row["full_name"] or row["username"], admin=False, avatar=row["avatar"],
+                               must_change=bool(row["must_change_password"]))
         if g._user and now - session.get("seen", 0) > 60:
             session["seen"] = now
     return g._user
@@ -149,6 +150,14 @@ def require_login():
         return None
     nxt = request.full_path.rstrip("?") if request.method == "GET" else ""
     return redirect(url_for("login", next=nxt) if nxt and nxt != "/" else url_for("login"))
+
+
+@app.before_request
+def require_password_change():
+    """Пароль выдал администратор (новый пользователь или сброс) — пока не задан свой, сайт недоступен."""
+    user = current_user()
+    if user and user.get("must_change") and request.endpoint not in ("account", "logout", "static", "robots"):
+        return redirect(url_for("account"))
 
 
 def csrf_token():
@@ -315,7 +324,8 @@ def validate_password(password, admin=False):
 
 def create_user(username, password, full_name=""):
     conn = get_db()
-    conn.execute("INSERT INTO users (username, full_name, password_hash, created_at) VALUES (?, ?, ?, ?)",
+    conn.execute("INSERT INTO users (username, full_name, password_hash, created_at, must_change_password) "
+                 "VALUES (?, ?, ?, ?, 1)",
                  (username, full_name, generate_password_hash(password), date.today().isoformat()))
     conn.commit()
 
@@ -349,7 +359,8 @@ def user_new():
     else:
         create_user(username, password, form_str("full_name"))
         app.logger.warning("user created: %s", username)
-        flash(f"Пользователь «{username}» создан. Передайте ему логин и пароль.", "success")
+        flash(f"Пользователь «{username}» создан. Передайте ему логин и пароль — при первом входе он задаст свой.",
+              "success")
     return redirect(url_for("users_page"))
 
 
@@ -508,12 +519,12 @@ def user_password(user_id):
         flash(error, "danger")
         return redirect(back)
     conn = get_db()
-    cur = conn.execute("UPDATE users SET password_hash = ? WHERE id = ?",
-                       (generate_password_hash(password), user_id))
+    cur = conn.execute("UPDATE users SET password_hash = ?, must_change_password = 1, reset_requested_at = '' "
+                       "WHERE id = ?", (generate_password_hash(password), user_id))
     conn.commit()
     if not cur.rowcount:
         abort(404)
-    flash("Пароль изменён. Открытые сессии этого пользователя закрыты.", "success")
+    flash("Пароль изменён, открытые сессии пользователя закрыты. При входе он задаст свой пароль.", "success")
     return redirect(back)
 
 
@@ -532,10 +543,14 @@ def user_delete(user_id):
 
 @app.route("/account", methods=["GET", "POST"])
 def account():
-    """Смена собственного пароля. У пользователя форма — в его профиле, у администратора профиля нет."""
+    """Смена собственного пароля. У пользователя форма — в его профиле, у администратора профиля нет.
+    Если пароль выдал администратор, пользователь попадает сюда, пока не задаст свой."""
     user = current_user()
-    if not user["admin"] and request.method == "GET":
-        return redirect(url_for("user_profile", user_id=user["id"]))
+    forced = bool(user.get("must_change"))
+    # Пользователь меняет пароль в профиле; отдельная страница — только когда смена обязательна.
+    back = None if user["admin"] or forced else url_for("user_profile", user_id=user["id"])
+    if back and request.method == "GET":
+        return redirect(back)
     if request.method == "POST":
         conn = get_db()
         ip = client_ip()
@@ -545,9 +560,9 @@ def account():
                 >= LOGIN_MAX_FAILURES:
             conn.commit()
             flash(f"Слишком много неудачных попыток. Повторите через {LOGIN_WINDOW // 60} минут.", "danger")
-            if not user["admin"]:
-                return redirect(url_for("user_profile", user_id=user["id"]))
-            return render_template("account.html", min_len=min_password_len(user["admin"])), 429
+            if back:
+                return redirect(back)
+            return render_template("account.html", min_len=min_password_len(user["admin"]), forced=forced), 429
         if user["admin"]:
             old_hash = get_setting_safe("admin_password")
         else:
@@ -572,16 +587,64 @@ def account():
             if user["admin"]:
                 db.set_setting("admin_password", new_hash)
             else:
-                conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user["id"]))
+                conn.execute("UPDATE users SET password_hash = ?, must_change_password = 0, reset_requested_at = '' "
+                             "WHERE id = ?", (new_hash, user["id"]))
                 conn.commit()
             # Текущая сессия остаётся, остальные сессии этого пользователя закрываются.
             session["pwm"] = password_marker(new_hash)
             app.logger.warning("password changed: user=%s ip=%s", user["username"], ip)
+            if forced:
+                flash("Пароль сохранён. Теперь входите с ним.", "success")
+                return redirect(url_for("index"))
             flash("Пароль изменён. На других устройствах нужно будет войти заново.", "success")
             return redirect(url_for("account"))
-        if not user["admin"]:
-            return redirect(url_for("user_profile", user_id=user["id"]))
-    return render_template("account.html", min_len=min_password_len(user["admin"]))
+        if back:
+            return redirect(back)
+    return render_template("account.html", min_len=min_password_len(user["admin"]), forced=forced)
+
+
+FORGOT_MAX_PER_IP = 5            # нажатий «Забыли пароль?» с одного адреса за час
+FORGOT_REPEAT = 30 * 60          # повторное уведомление об одном пользователе — не чаще, сек
+
+
+def site_url_for(endpoint, **values):
+    """Полная ссылка для Telegram: адрес сайта из настроек или тот, по которому зашли."""
+    base = db.get_setting("site_url", "") or request.url_root
+    return base.rstrip("/") + url_for(endpoint, **values)
+
+
+@app.route("/forgot", methods=["GET", "POST"])
+def forgot_password():
+    """«Забыли пароль?» — администратор получает уведомление и сам выдаёт новый пароль.
+    Ответ одинаковый, есть такой логин или нет, — чтобы по нему нельзя было подбирать логины."""
+    if current_user():
+        return redirect(url_for("index"))
+    if request.method == "POST":
+        conn = get_db()
+        ip, now = client_ip(), time.time()
+        conn.execute("DELETE FROM forgot_requests WHERE ts < ?", (now - 3600,))
+        if conn.execute("SELECT COUNT(*) FROM forgot_requests WHERE ip = ?", (ip,)).fetchone()[0] \
+                >= FORGOT_MAX_PER_IP:
+            conn.commit()
+            flash("Слишком много запросов. Попробуйте через час или свяжитесь с администратором напрямую.", "danger")
+            return render_template("forgot.html"), 429
+        conn.execute("INSERT INTO forgot_requests (ip, ts) VALUES (?, ?)", (ip, now))
+        username = form_str("username", 60)
+        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone() if username else None
+        app.logger.warning("forgot password: user=%s found=%s ip=%s", username[:50], bool(row), ip)
+        if row:
+            last = row["reset_requested_at"]
+            repeat = last and time.time() - time.mktime(time.strptime(last, "%Y-%m-%d %H:%M")) < FORGOT_REPEAT
+            conn.execute("UPDATE users SET reset_requested_at = ? WHERE id = ?", (now_str(), row["id"]))
+            if not repeat:
+                from html import escape
+                name = row["full_name"] or row["username"]
+                notify_admin(f"🔑 <b>Забыл пароль:</b> {escape(name)} (логин <code>{escape(row['username'])}</code>)\n"
+                             f"Задайте новый пароль в профиле и сообщите его:\n"
+                             f"{site_url_for('user_profile', user_id=row['id'])}")
+        conn.commit()
+        return render_template("forgot.html", sent=True)
+    return render_template("forgot.html")
 
 
 @app.cli.command("add-user")
@@ -1600,9 +1663,7 @@ def watch(conn, ticket_id, user_id):
 
 
 def ticket_url(ticket_id):
-    """Полная ссылка на заявку для Telegram: адрес сайта из настроек или тот, по которому зашли."""
-    base = db.get_setting("site_url", "") or request.url_root
-    return base.rstrip("/") + url_for("ticket", ticket_id=ticket_id)
+    return site_url_for("ticket", ticket_id=ticket_id)
 
 
 def notify_admin(text):

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf %}
+{% block title %}Забыли пароль{% endblock %}
+{% block content %}
+{% if sent %}
+<div class="card login-card">
+  <h1>Запрос отправлен</h1>
+  <p>Администратор получил уведомление и свяжется с вами, чтобы выдать новый пароль.</p>
+  <p class="muted small">С новым паролем войдите как обычно — сайт сразу попросит придумать свой.</p>
+  <a class="btn" href="{{ url_for('login') }}">Ко входу</a>
+</div>
+{% else %}
+<form method="post" class="card login-card">
+  {{ csrf() }}
+  <h1>Забыли пароль?</h1>
+  <p class="muted small">Укажите свой логин — администратор получит уведомление, свяжется с вами и выдаст новый пароль.</p>
+  <label>Логин <input type="text" name="username" required autofocus autocomplete="username"></label>
+  <button class="btn btn-primary">Сообщить администратору</button>
+  <a class="small" href="{{ url_for('login') }}">← Ко входу</a>
+</form>
+{% endif %}
+{% endblock %}

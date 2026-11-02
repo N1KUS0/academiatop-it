@@ -24,7 +24,9 @@
     <tbody>
     {% for u in users %}
       <tr>
-        <td><span class="author">{{ avatar(u.id, u.avatar, u.full_name or u.username, 28) }}<a href="{{ url_for('user_profile', user_id=u.id) }}" class="strong">{{ u.username }}</a></span></td>
+        <td><span class="author">{{ avatar(u.id, u.avatar, u.full_name or u.username, 28) }}<a href="{{ url_for('user_profile', user_id=u.id) }}" class="strong">{{ u.username }}</a></span>
+          {% if u.reset_requested_at %}<span class="badge need-by urgent" title="Нажал «Забыли пароль?» {{ u.reset_requested_at }}">просит сбросить пароль</span>
+          {% elif u.must_change_password %}<span class="badge" title="Ещё не задал свой пароль">временный пароль</span>{% endif %}</td>
         <td>{{ u.full_name or '—' }}</td>
         <td class="num">{{ u.tickets or '—' }}</td>
         <td>{{ u.created_at | ru_date }}</td>

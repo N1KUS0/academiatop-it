@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS users (
     username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
     full_name     TEXT NOT NULL DEFAULT '',   -- отображаемое имя (ФИО); пусто — показывается логин
     password_hash TEXT NOT NULL,
+    must_change_password INTEGER NOT NULL DEFAULT 0,  -- пароль выдал администратор: при входе задать свой
+    reset_requested_at   TEXT NOT NULL DEFAULT '',    -- когда нажал «Забыли пароль?» (пусто — не просил)
     created_at    TEXT NOT NULL DEFAULT '',
     last_login    TEXT NOT NULL DEFAULT ''
 );
@@ -153,6 +155,12 @@ CREATE TABLE IF NOT EXISTS ticket_watchers (
     PRIMARY KEY (ticket_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS ticket_watchers_user ON ticket_watchers (user_id);
+
+-- Нажатия «Забыли пароль?» — чтобы с одного адреса не засыпать администратора уведомлениями.
+CREATE TABLE IF NOT EXISTS forgot_requests (
+    ip TEXT NOT NULL,
+    ts REAL NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS login_failures (
     ip TEXT NOT NULL,
@@ -239,6 +247,10 @@ def migrate(conn):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
     if "position" in cols:  # должности были недолго, потом их убрали
         conn.execute("ALTER TABLE users DROP COLUMN position")
+    if "must_change_password" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0")
+    if "reset_requested_at" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN reset_requested_at TEXT NOT NULL DEFAULT ''")
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(tickets)")}
     if "auditorium_id" not in cols:
         conn.execute("ALTER TABLE tickets ADD COLUMN auditorium_id INTEGER "

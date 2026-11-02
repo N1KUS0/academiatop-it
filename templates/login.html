@@ -9,7 +9,7 @@
   <label>Логин <input type="text" name="username" required autofocus autocomplete="username"></label>
   <label>Пароль <input type="password" name="password" required autocomplete="current-password"></label>
   <label class="check"><input type="checkbox" name="remember" value="1"> Запомнить меня на 30 дней</label>
-  <p class="muted small" style="margin:-4px 0 0">Не отмечайте на чужом или общем компьютере. Без галочки вход действует 12 часов.</p>
   <button class="btn btn-primary">Войти</button>
+  <a class="small" href="{{ url_for('forgot_password') }}">Забыли пароль?</a>
 </form>
 {% endblock %}

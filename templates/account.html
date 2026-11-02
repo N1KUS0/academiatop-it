@@ -4,12 +4,20 @@
 {% block content %}
 <form method="post" class="card login-card">
   {{ csrf() }}
-  <h1>Смена пароля</h1>
+  <h1>{{ 'Придумайте свой пароль' if forced else 'Смена пароля' }}</h1>
+  {% if forced %}
+  <p class="flash flash-info" style="margin:0">Пароль, с которым вы вошли, выдал администратор. Придумайте свой — дальше входите с ним.</p>
+  {% endif %}
   <p class="muted small">Логин: <strong>{{ current_user.username }}</strong>{% if current_user.name != current_user.username %} · {{ current_user.name }}{% endif %}</p>
-  <label>Текущий пароль <input type="password" name="current" required autofocus autocomplete="current-password"></label>
+  <label>{{ 'Пароль, выданный администратором' if forced else 'Текущий пароль' }} <input type="password" name="current" required autofocus autocomplete="current-password"></label>
   <label>Новый пароль <input type="password" name="new" required minlength="{{ min_len }}" autocomplete="new-password"></label>
   <label>Новый пароль ещё раз <input type="password" name="confirm" required minlength="{{ min_len }}" autocomplete="new-password"></label>
-  <p class="muted small">Не короче {{ min_len }} символов. После смены на других устройствах нужно будет войти заново.</p>
-  <button class="btn btn-primary">Сменить пароль</button>
+  <p class="muted small">Не короче {{ min_len }} символов.{% if not forced %} После смены на других устройствах нужно будет войти заново.{% endif %}</p>
+  <button class="btn btn-primary">{{ 'Сохранить пароль' if forced else 'Сменить пароль' }}</button>
 </form>
+{% if forced %}
+<form method="post" action="{{ url_for('logout') }}" class="login-card" style="margin-top:8px; text-align:center">
+  {{ csrf() }}<button class="btn btn-link">Выйти</button>
+</form>
+{% endif %}
 {% endblock %}

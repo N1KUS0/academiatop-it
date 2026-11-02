@@ -42,8 +42,17 @@
     </form>
     {% endif %}
   </div>
-  <p class="muted small">JPG, PNG, WEBP или GIF до 10 МБ. Фото обрежется до квадрата по центру и уменьшится; данные о месте съёмки не сохраняются.</p>
+  <p class="muted small">JPG, PNG, WEBP или GIF до 10 МБ. Фото обрежется до квадрата по центру.</p>
 </section>
+{% endif %}
+
+{% if is_admin and user.reset_requested_at %}
+<div class="card hint">
+  <b>{{ user.reset_requested_at }} нажал «Забыли пароль?».</b>
+  Задайте новый пароль ниже и сообщите его — при входе пользователь сразу придумает свой.
+</div>
+{% elif is_admin and user.must_change_password %}
+<p class="muted small">Пароль выдан администратором: при входе пользователь задаст свой.</p>
 {% endif %}
 
 {% if is_admin %}
