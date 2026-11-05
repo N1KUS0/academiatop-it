@@ -394,3 +394,35 @@ form.inline { display: inline; margin: 0; }
   border: 0; background: var(--ink); color: #fff; font-size: 15px; line-height: 22px; padding: 0; cursor: pointer;
 }
 form.drop-target { outline: 2px dashed var(--accent); outline-offset: 4px; }
+
+/* ---------- карта ПК в сети ---------- */
+.netmap-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.netmap-head h2 { margin-bottom: 2px; }
+.netmap-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--ink-2); margin: 8px 0 12px; }
+.netmap-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.net-pc-mark { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.netmap-aud { display: flex; gap: 14px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
+.netmap-aud-name { flex: 0 0 120px; color: var(--ink); display: flex; flex-direction: column; }
+.netmap-aud-name:hover { color: var(--accent-dark); text-decoration: none; }
+.netmap-aud-name span { font-size: 12px; color: var(--muted); }
+.netmap-pcs { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
+.net-pc {
+  font-family: var(--mono); font-size: 12px; font-weight: 600; width: 38px; text-align: center; padding: 6px 0;
+  border-radius: 6px; border: 1px solid transparent; color: var(--ink-2); background: #eef0f3;
+  transition: background-color .3s, color .3s;
+}
+.net-pc:hover { text-decoration: none; border-color: var(--ink-2); }
+.state-up { background: var(--ok); color: #fff; }
+.state-down { background: var(--bad-soft); color: var(--bad); }
+.net-pc.state-down { border-color: #f0c4c4; }
+.state-noip { background: #fff; color: var(--muted); border: 1px dashed #c3c7cf; }
+.state-off { background: #eceef1; color: #b0b4bc; }
+.net-pc.state-off { text-decoration: line-through; }
+.state-wait { background: #eef0f3; color: var(--muted); }
+.net-pc.is-repair { box-shadow: inset 0 -3px 0 var(--warn); }
+.netmap.is-loading .net-pc.state-wait { animation: netmap-pulse 1.2s ease-in-out infinite; }
+@keyframes netmap-pulse { 50% { opacity: .45; } }
+@media (max-width: 600px) {
+  .netmap-aud { flex-direction: column; gap: 6px; }
+  .netmap-aud-name { flex: none; flex-direction: row; gap: 8px; align-items: baseline; }
+}

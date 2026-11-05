@@ -11,13 +11,14 @@ from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
 import click
-from flask import (Flask, Response, abort, flash, g, redirect, render_template,
+from flask import (Flask, Response, abort, flash, g, jsonify, redirect, render_template,
                    request, send_file, session, url_for)
 from flask.sessions import SecureCookieSessionInterface
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import db
 import inventory
+import netmap
 import telegram
 from db import (CATEGORIES, COMPUTERS_SQL, LICENSE_TYPES, STATUSES, TICKET_KINDS,
                 TICKET_OPEN, TICKET_STATUSES, aud_code, computer_dict, get_db,
@@ -786,9 +787,38 @@ def index():
         TICKETS_SQL + " WHERE t.status IN (%s) ORDER BY t.updated_at DESC, t.id DESC"
         % ",".join("?" * len(TICKET_OPEN)), (current_user()["id"], *TICKET_OPEN))]
     open_tickets.sort(key=lambda t: not t["unread"])
+    computers = list_computers()
+    for c in computers:
+        c["ip"] = netmap.ip_from_note(c["note"])
     return render_template("index.html", stats=stats, top=top, recent=recent,
-                           auditoriums=list_auditoriums(), pc_hostname=pc_hostname,
+                           auditoriums=list_auditoriums(), computers=computers, pc_hostname=pc_hostname,
                            last_import=last_import, open_tickets=open_tickets)
+
+
+@app.route("/api/netmap")
+def netmap_status():
+    """Какие ПК отвечают на ping: {hostname: "up" | "down" | "noip" | "off"}. Списанные не пингуются."""
+    computers = list_computers()
+    targets = {}
+    for c in computers:
+        ip = netmap.ip_from_note(c["note"])
+        if ip and c["status"] != "decommissioned":
+            targets[c["hostname"]] = ip
+    alive, checked_at = netmap.check(targets.values())
+    pcs = {}
+    for c in computers:
+        host = c["hostname"]
+        if c["status"] == "decommissioned":
+            pcs[host] = {"state": "off"}
+        elif host not in targets:
+            pcs[host] = {"state": "noip"}
+        elif targets[host] in alive:
+            pcs[host] = {"state": "up", "ms": alive[targets[host]]}
+        else:
+            pcs[host] = {"state": "down"}
+    resp = jsonify(checked_at=datetime.fromtimestamp(checked_at).strftime("%H:%M:%S"), pcs=pcs)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 # --------------------------------------------------------------------------- auditoriums

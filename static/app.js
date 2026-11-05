@@ -298,3 +298,53 @@ document.querySelectorAll('input[type="password"]').forEach(function (input) {
   wrap.appendChild(btn);
   render();
 });
+
+// Карта ПК в сети на главной: статусы по ping, обновляются раз в минуту, пока вкладка открыта
+(function () {
+  var map = document.getElementById("netmap");
+  if (!map) return;
+  var summary = document.getElementById("netmap-summary");
+  var button = document.getElementById("netmap-refresh");
+  var tiles = map.querySelectorAll(".net-pc[data-host]");
+  var TEXT = { up: "в сети", down: "не отвечает", noip: "IP неизвестен — впишите «IP: …» в примечание", off: "списан" };
+  var busy = false, timer = null;
+
+  function apply(data) {
+    var up = 0, total = 0, perAud = {};
+    tiles.forEach(function (el) {
+      var info = data.pcs[el.dataset.host] || { state: "noip" };
+      el.className = el.className.replace(/\bstate-\w+/, "state-" + info.state);
+      el.title = el.dataset.label + " — " + TEXT[info.state] + (info.ms != null ? " (" + info.ms + " мс)" : "");
+      var a = perAud[el.dataset.aud] || (perAud[el.dataset.aud] = { up: 0, total: 0 });
+      if (info.state !== "off") { total++; a.total++; }
+      if (info.state === "up") { up++; a.up++; }
+    });
+    Object.keys(perAud).forEach(function (num) {
+      var span = map.querySelector('[data-aud-count="' + num + '"]');
+      if (span) span.textContent = perAud[num].up + " из " + perAud[num].total + " в сети";
+    });
+    summary.textContent = "В сети " + up + " из " + total + " ПК · проверено в " + data.checked_at;
+  }
+
+  function refresh() {
+    if (busy) return;
+    busy = true;
+    button.disabled = true;
+    map.classList.add("is-loading");
+    fetch(map.dataset.url, { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(apply)
+      .catch(function () { summary.textContent = "Не удалось проверить сеть. Попробуйте обновить."; })
+      .then(function () { busy = false; button.disabled = false; map.classList.remove("is-loading"); });
+  }
+
+  function schedule() {
+    clearInterval(timer);
+    timer = document.hidden ? null : setInterval(refresh, 60000);
+  }
+
+  button.addEventListener("click", refresh);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); schedule(); });
+  refresh();
+  schedule();
+})();
