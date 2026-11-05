@@ -408,7 +408,9 @@ form.drop-target { outline: 2px dashed var(--accent); outline-offset: 4px; }
 .netmap-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .net-pc-mark { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .netmap-aud { display: flex; gap: 14px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
-.netmap-aud-name { flex: 0 0 120px; color: var(--ink); display: flex; flex-direction: column; }
+.netmap-aud-side { flex: 0 0 120px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.netmap-aud-name { color: var(--ink); display: flex; flex-direction: column; }
+.netmap-wake { min-height: 24px; padding: 2px 8px; font-size: 12px; }
 .netmap-aud-name:hover { color: var(--accent-dark); text-decoration: none; }
 .netmap-aud-name span { font-size: 12px; color: var(--muted); }
 .netmap-pcs { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
@@ -431,5 +433,6 @@ form.drop-target { outline: 2px dashed var(--accent); outline-offset: 4px; }
 @keyframes netmap-pulse { 50% { opacity: .45; } }
 @media (max-width: 600px) {
   .netmap-aud { flex-direction: column; gap: 6px; }
-  .netmap-aud-name { flex: none; flex-direction: row; gap: 8px; align-items: baseline; }
+  .netmap-aud-side { flex: none; flex-direction: row; align-items: center; gap: 12px; }
+  .netmap-aud-name { flex-direction: row; gap: 8px; align-items: baseline; }
 }

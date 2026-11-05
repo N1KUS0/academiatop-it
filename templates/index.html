@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import cat_badge, ticket_badge, kind_badge, author_link %}
+{% from "macros.html" import csrf, cat_badge, ticket_badge, kind_badge, author_link %}
 {% block title %}Главная{% endblock %}
 {% block content %}
 {% set shown = open_tickets[:6] %}
@@ -114,9 +114,18 @@
   </div>
   {% for a in auditoriums %}
   <div class="netmap-aud">
-    <a class="netmap-aud-name" href="{{ url_for('auditorium', code='AUD-' ~ a.num) }}">
-      <b>AUD-{{ a.num }}</b><span data-aud-count="{{ a.num }}">{{ a.pc_count }} ПК</span>
-    </a>
+    <div class="netmap-aud-side">
+      <a class="netmap-aud-name" href="{{ url_for('auditorium', code='AUD-' ~ a.num) }}">
+        <b>AUD-{{ a.num }}</b><span data-aud-count="{{ a.num }}">{{ a.pc_count }} ПК</span>
+      </a>
+      {% if is_admin and computers|selectattr('auditorium_id', 'equalto', a.id)|selectattr('wol')|list %}
+      <form method="post" action="{{ url_for('auditorium_wake', code='AUD-' ~ a.num) }}" class="inline"
+            data-confirm="Включить по Wake-on-LAN все компьютеры AUD-{{ a.num }}?">
+        {{ csrf() }}<input type="hidden" name="back" value="home">
+        <button class="btn btn-sm netmap-wake" title="Wake-on-LAN для всех ПК аудитории">⏻ Включить</button>
+      </form>
+      {% endif %}
+    </div>
     <div class="netmap-pcs">
       {% for c in computers if c.auditorium_id == a.id %}
         <a class="net-pc state-wait{{ ' is-repair' if c.status == 'repair' }}" data-host="{{ c.hostname }}" data-aud="{{ a.num }}"

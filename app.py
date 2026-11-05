@@ -815,9 +815,62 @@ def index():
     computers = list_computers()
     for c in computers:
         c["ip"] = netmap.ip_from_note(c["note"])
+        c["wol"] = c["status"] != "decommissioned" and bool(netmap.macs_from_note(c["note"]))
     return render_template("index.html", stats=stats, top=top, recent=recent,
                            auditoriums=list_auditoriums(), computers=computers, pc_hostname=pc_hostname,
                            last_import=last_import, open_tickets=open_tickets)
+
+
+def wake_computers(computers):
+    """Wake-on-LAN для списка ПК (списанные пропускаются). -> (имена разбуженных, имена ПК без MAC)."""
+    woken, no_mac = [], []
+    for c in computers:
+        if c["status"] == "decommissioned":
+            continue
+        macs = netmap.macs_from_note(c["note"])
+        if macs and netmap.wake(macs, netmap.ip_from_note(c["note"])):
+            woken.append(c["hostname"])
+        else:
+            no_mac.append(c["hostname"])
+    if woken:
+        app.logger.warning("wol: %s (by %s, ip=%s)", ", ".join(woken), current_user()["username"] or "admin",
+                           request.remote_addr)
+    return woken, no_mac
+
+
+def wake_redirect(default):
+    """Назад туда, откуда нажали «Включить»: на главную или на страницу ПК/аудитории."""
+    return redirect(url_for("index") + "#netmap" if request.form.get("back") == "home" else default)
+
+
+@app.route("/computers/<hostname>/wake", methods=["POST"])
+@admin_required
+def computer_wake(hostname):
+    pc = get_computer_or_404(hostname)
+    if pc["status"] == "decommissioned":
+        flash("Компьютер списан.", "warning")
+    else:
+        woken, _ = wake_computers([pc])
+        if woken:
+            flash(f"{pc['hostname']}: команда на включение отправлена. Загрузка займёт 1–2 минуты.", "success")
+        else:
+            flash(f"У {pc['hostname']} неизвестен MAC-адрес: впишите «MAC: …» в примечание.", "warning")
+    return wake_redirect(url_for("computer", hostname=pc["hostname"]))
+
+
+@app.route("/auditoriums/<code>/wake", methods=["POST"])
+@admin_required
+def auditorium_wake(code):
+    aud = get_auditorium_or_404(code)
+    woken, no_mac = wake_computers(list_computers(" WHERE c.auditorium_id = ?", (aud["id"],)))
+    code = aud_code(aud["num"])
+    if woken:
+        flash(f"{code}: команда на включение отправлена на {len(woken)} ПК. Загрузка займёт 1–2 минуты.", "success")
+    if no_mac:
+        flash(f"Без MAC-адреса, не включены: {', '.join(no_mac)}.", "warning")
+    if not woken and not no_mac:
+        flash(f"В {code} нет компьютеров для включения.", "info")
+    return wake_redirect(url_for("auditorium", code=code))
 
 
 @app.route("/api/netmap")
@@ -1002,7 +1055,7 @@ def computer(hostname):
         "(SELECT ticket_id FROM ticket_computers WHERE computer_id = ?)) AND status IN (%s) ORDER BY id DESC"
         % ",".join("?" * len(TICKET_OPEN)), (pc["id"], pc["id"], *TICKET_OPEN)).fetchall()
     return render_template("computer.html", pc=pc, installs=installs, sw_names=software_names(),
-                           open_tickets=open_tickets)
+                           open_tickets=open_tickets, pc_macs=netmap.macs_from_note(pc["note"]))
 
 
 @app.route("/computers/<hostname>/edit", methods=["GET", "POST"])

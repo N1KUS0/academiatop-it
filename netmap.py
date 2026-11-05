@@ -185,3 +185,46 @@ def check(ips):
             log.error("netmap: %s", e)
         _cache.update(at=time.time(), key=key, result=result, error=error)
         return result, _cache["at"], error
+
+
+# --------------------------------------------------------------------------- Wake-on-LAN
+
+_MAC_SECTION_RE = re.compile(r"\bMAC:\s*([^;]+)", re.IGNORECASE)
+_MAC_RE = re.compile(r"\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b")
+WOL_PORT = 9
+
+
+def macs_from_note(note):
+    """MAC-адреса из «MAC: …» в примечании (их может быть несколько — у ПК бывает не одна сетевая карта)."""
+    m = _MAC_SECTION_RE.search(note or "")
+    if not m:
+        return []
+    macs = []
+    for raw in _MAC_RE.findall(m.group(1)):
+        mac = raw.replace("-", ":").upper()
+        if mac not in macs and mac not in ("00:00:00:00:00:00", "FF:FF:FF:FF:FF:FF"):
+            macs.append(mac)
+    return macs
+
+
+def wake(macs, ip=None):
+    """Отправляет «магический пакет» Wake-on-LAN на каждый MAC.
+
+    Пакет уходит широковещательно (255.255.255.255) и, если IP ПК известен, ещё в широковещательный адрес
+    его сети /24 — на случай, если у сервера несколько сетевых интерфейсов. Возвращает число отправленных пакетов.
+    """
+    targets = ["255.255.255.255"]
+    if ip:
+        targets.append(ip.rsplit(".", 1)[0] + ".255")
+    sent = 0
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        for mac in macs:
+            packet = b"\xff" * 6 + bytes.fromhex(mac.replace(":", "")) * 16
+            for addr in targets:
+                try:
+                    sock.sendto(packet, (addr, WOL_PORT))
+                    sent += 1
+                except OSError:
+                    pass  # нет маршрута в эту сеть — хватит другого адреса
+    return sent

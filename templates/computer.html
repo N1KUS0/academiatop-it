@@ -14,6 +14,12 @@
     {% if is_admin %}
     <a class="btn" href="{{ url_for('computer_edit', hostname=pc.hostname) }}">Изменить</a>
     <a class="btn" href="{{ url_for('computer_new', copy=pc.hostname) }}" title="Создать следующий ПК с такими же характеристиками">Копировать</a>
+    {% if pc.status != 'decommissioned' %}
+    <form method="post" action="{{ url_for('computer_wake', hostname=pc.hostname) }}" class="inline">
+      {{ csrf() }}
+      <button class="btn" {% if not pc_macs %}disabled title="MAC-адрес неизвестен: впишите «MAC: …» в примечание"{% else %}title="Wake-on-LAN: {{ pc_macs|join(', ') }}"{% endif %}>⏻ Включить</button>
+    </form>
+    {% endif %}
     {% endif %}
   </div>
 </div>

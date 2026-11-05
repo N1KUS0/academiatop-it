@@ -9,6 +9,12 @@
     <a class="btn" href="{{ url_for('ticket_new', kind='problem', auditorium=code) }}">Сообщить о проблеме</a>
     <a class="btn" href="{{ url_for('ticket_new', kind='install', auditorium=code) }}">Запросить установку ПО</a>
     {% if is_admin %}
+    {% if computers %}
+    <form method="post" action="{{ url_for('auditorium_wake', code=code) }}" class="inline"
+          data-confirm="Включить по Wake-on-LAN все компьютеры {{ code }}?">
+      {{ csrf() }}<button class="btn" title="Wake-on-LAN для всех ПК аудитории, кроме списанных">⏻ Включить все ПК</button>
+    </form>
+    {% endif %}
     <a class="btn btn-primary" href="{{ url_for('computer_new', aud=aud.id) }}">+ Компьютер</a>
     {% endif %}
   </div>
