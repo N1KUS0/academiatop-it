@@ -19,6 +19,11 @@
       {{ csrf() }}
       <button class="btn" {% if not pc_macs %}disabled title="MAC-адрес неизвестен: впишите «MAC: …» в примечание"{% else %}title="Wake-on-LAN: {{ pc_macs|join(', ') }}"{% endif %}>⏻ Включить</button>
     </form>
+    <form method="post" action="{{ url_for('computer_shutdown', hostname=pc.hostname) }}" class="inline"
+          data-confirm="Выключить {{ pc.hostname }}? Пользователь увидит предупреждение, через минуту ПК выключится — несохранённая работа пропадёт.">
+      {{ csrf() }}
+      <button class="btn btn-danger" {% if not shutdown_ready %}disabled title="Не задана учётная запись для выключения — см. «Данные» → «Выключение ПК»"{% else %}title="Выключить через минуту с предупреждением пользователю"{% endif %}>⏼ Выключить</button>
+    </form>
     {% endif %}
     {% endif %}
   </div>

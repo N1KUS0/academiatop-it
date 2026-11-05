@@ -78,4 +78,19 @@
   </form>
   {% endif %}
 </section>
+
+<section class="card" id="shutdown" style="margin-top:16px">
+  <h2>Выключение ПК</h2>
+  <p class="muted small">Кнопки «Выключить» на страницах ПК и аудиторий и в блоке «ПК в сети» выключают компьютеры по сети
+    от имени доменной учётной записи с правами администратора на ПК. Пользователь видит предупреждение, через минуту ПК выключается.</p>
+  {% if shutdown_account %}
+  <p class="small"><b class="ok-text">Включено.</b> Учётная запись:
+    <code>{{ shutdown_account.domain ~ '\\' if shutdown_account.domain }}{{ shutdown_account.username }}</code></p>
+  {% else %}
+  <p class="small"><b>Сейчас выключено:</b> учётная запись не задана.</p>
+  {% endif %}
+  <p class="muted small">Учётная запись хранится на сервере в отдельном файле (не в базе и не в копиях в Telegram),
+    поэтому задаётся только на сервере:</p>
+  <pre class="small"><code>cd /opt/registry && sudo -u registry REGISTRY_DB=/opt/registry/instance/registry.db .venv/bin/flask --app app set-shutdown-account</code></pre>
+</section>
 {% endblock %}

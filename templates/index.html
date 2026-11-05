@@ -125,6 +125,13 @@
         <button class="btn btn-sm netmap-wake" title="Wake-on-LAN для всех ПК аудитории">⏻ Включить</button>
       </form>
       {% endif %}
+      {% if shutdown_ready and computers|selectattr('auditorium_id', 'equalto', a.id)|list %}
+      <form method="post" action="{{ url_for('auditorium_shutdown', code='AUD-' ~ a.num) }}" class="inline"
+            data-confirm="Выключить все включённые компьютеры AUD-{{ a.num }}? Пользователи увидят предупреждение, через минуту ПК выключатся.">
+        {{ csrf() }}<input type="hidden" name="back" value="home">
+        <button class="btn btn-sm btn-danger netmap-wake" title="Выключить все ПК аудитории, которые сейчас в сети">⏼ Выключить</button>
+      </form>
+      {% endif %}
     </div>
     <div class="netmap-pcs">
       {% for c in computers if c.auditorium_id == a.id %}

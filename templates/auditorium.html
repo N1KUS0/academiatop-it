@@ -14,6 +14,12 @@
           data-confirm="Включить по Wake-on-LAN все компьютеры {{ code }}?">
       {{ csrf() }}<button class="btn" title="Wake-on-LAN для всех ПК аудитории, кроме списанных">⏻ Включить все ПК</button>
     </form>
+    {% if shutdown_ready %}
+    <form method="post" action="{{ url_for('auditorium_shutdown', code=code) }}" class="inline"
+          data-confirm="Выключить все включённые компьютеры {{ code }}? Пользователи увидят предупреждение, через минуту ПК выключатся — несохранённая работа пропадёт.">
+      {{ csrf() }}<button class="btn btn-danger" title="Выключить все ПК аудитории, которые сейчас в сети">⏼ Выключить все ПК</button>
+    </form>
+    {% endif %}
     {% endif %}
     <a class="btn btn-primary" href="{{ url_for('computer_new', aud=aud.id) }}">+ Компьютер</a>
     {% endif %}

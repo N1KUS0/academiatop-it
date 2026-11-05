@@ -13,7 +13,7 @@ fi
 
 echo "==> Пакеты"
 apt-get update -q
-apt-get install -y -q python3 python3-venv nginx rsync sqlite3
+apt-get install -y -q python3 python3-venv nginx rsync sqlite3 samba-common-bin
 
 echo "==> Пользователь registry"
 id registry >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin registry

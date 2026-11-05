@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
 import click
-from flask import (Flask, Response, abort, flash, g, jsonify, redirect, render_template,
+from flask import (Flask, Response, abort, flash, g, has_request_context, jsonify, redirect, render_template,
                    request, send_file, session, url_for)
 from flask.sessions import SecureCookieSessionInterface
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -22,6 +22,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import db
 import inventory
 import netmap
+import shutdown
 import telegram
 from db import (CATEGORIES, COMPUTERS_SQL, LICENSE_TYPES, STATUSES, TICKET_KINDS,
                 TICKET_OPEN, TICKET_STATUSES, aud_code, computer_dict, get_db,
@@ -840,8 +841,109 @@ def wake_computers(computers):
     return woken, no_mac
 
 
+INSTANCE_DIR = os.path.dirname(app.config["DATABASE"])
+
+
+def shutdown_account():
+    return shutdown.load_account(INSTANCE_DIR)
+
+
+@app.context_processor
+def shutdown_context():
+    return {"shutdown_ready": is_admin() and bool(shutdown_account())}
+
+
+def shutdown_computers(computers):
+    """Выключить ПК, которые сейчас в сети. Адрес — только проверенный блоком «ПК в сети» (ответил именно этот ПК),
+    чтобы по устаревшей записи DNS не выключить чужой компьютер. -> (выключаются, не в сети, {имя: ошибка})."""
+    computers = [c for c in computers if c["status"] != "decommissioned"]
+    up, _at, error, _details = netmap.status(computers)
+    if error:
+        return [], [], {c["hostname"]: error for c in computers}
+    offline = [c["hostname"] for c in computers if c["hostname"] not in up]
+    results = shutdown.shutdown_many([up[h]["ip"] for h in up], INSTANCE_DIR)
+    started, failed = [], {}
+    for host, info in up.items():
+        ok, text = results[info["ip"]]
+        if ok:
+            started.append(host)
+        else:
+            failed[host] = text
+    who = (current_user()["username"] or "admin", request.remote_addr) if has_request_context() else ("cli", "-")
+    if started:
+        app.logger.warning("shutdown: %s (by %s, ip=%s)", ", ".join(sorted(started)), *who)
+    for host, text in failed.items():
+        app.logger.warning("shutdown failed: %s: %s", host, text)
+    return sorted(started), offline, failed
+
+
+def flash_shutdown(started, offline, failed, label):
+    if started == [label]:
+        flash(f"{label}: выключение запущено. Пользователь увидит предупреждение, через минуту ПК выключится.", "success")
+    elif started:
+        flash(f"{label}: выключение запущено на {len(started)} ПК ({', '.join(started)}). "
+              f"Пользователи увидят предупреждение, через минуту ПК выключатся.", "success")
+    for host, text in sorted(failed.items()):
+        flash(f"{host}: не удалось выключить — {text}.", "danger")
+    if offline and not started and not failed:
+        flash(f"{label}: выключать нечего — {'ПК не в сети' if len(offline) == 1 else 'ни один ПК не в сети'}.", "info")
+    elif offline and (started or failed):
+        flash(f"Не в сети, пропущены: {', '.join(offline)}.", "info")
+
+
+@app.route("/computers/<hostname>/shutdown", methods=["POST"])
+@admin_required
+def computer_shutdown(hostname):
+    pc = get_computer_or_404(hostname)
+    if not shutdown_account():
+        flash("Сначала задайте учётную запись для выключения — см. «Данные» → «Выключение ПК».", "warning")
+    elif pc["status"] == "decommissioned":
+        flash("Компьютер списан.", "warning")
+    else:
+        flash_shutdown(*shutdown_computers([pc]), pc["hostname"])
+    return wake_redirect(url_for("computer", hostname=pc["hostname"]))
+
+
+@app.route("/auditoriums/<code>/shutdown", methods=["POST"])
+@admin_required
+def auditorium_shutdown(code):
+    aud = get_auditorium_or_404(code)
+    code = aud_code(aud["num"])
+    if not shutdown_account():
+        flash("Сначала задайте учётную запись для выключения — см. «Данные» → «Выключение ПК».", "warning")
+    else:
+        flash_shutdown(*shutdown_computers(list_computers(" WHERE c.auditorium_id = ?", (aud["id"],))), code)
+    return wake_redirect(url_for("auditorium", code=code))
+
+
+@app.cli.command("set-shutdown-account")
+@click.option("--domain", prompt="Домен (например TOP)", default="", show_default=False)
+@click.option("--username", prompt="Логин учётной записи с правами администратора на ПК")
+@click.password_option("--password", prompt="Пароль", confirmation_prompt="Ещё раз")
+def set_shutdown_account_command(domain, username, password):
+    """Учётная запись для выключения ПК (хранится в instance/shutdown.auth, не в базе)."""
+    shutdown.save_account(INSTANCE_DIR, domain.strip(), username.strip(), password)
+    click.echo(f"Сохранено: {domain.strip() + chr(92) if domain.strip() else ''}{username.strip()} "
+               f"в {shutdown.auth_path(INSTANCE_DIR)}")
+
+
+@app.cli.command("del-shutdown-account")
+def del_shutdown_account_command():
+    """Удалить учётную запись для выключения ПК."""
+    click.echo("Удалено." if shutdown.delete_account(INSTANCE_DIR) else "Учётная запись не была задана.")
+
+
+@app.cli.command("shutdown-check")
+@click.argument("hostname")
+def shutdown_check_command(hostname):
+    """Проверить выключение на одном ПК. ПК действительно выключится (через минуту, с предупреждением)."""
+    pc = get_computer_or_404(hostname)
+    started, offline, failed = shutdown_computers([pc])
+    click.echo("Выключение запущено." if started else "ПК не в сети." if offline else f"Ошибка: {failed.get(pc['hostname'])}")
+
+
 def wake_redirect(default):
-    """Назад туда, откуда нажали «Включить»: на главную или на страницу ПК/аудитории."""
+    """Назад туда, откуда нажали «Включить»/«Выключить»: на главную или на страницу ПК/аудитории."""
     return redirect(url_for("index") + "#netmap" if request.form.get("back") == "home" else default)
 
 
@@ -1426,7 +1528,7 @@ def data_page():
         tg_backup = None
     return render_template("data.html", tg_token_tail=token[-4:] if token else "",
                            tg_chat=db.get_setting("telegram_chat", ""), site_url=db.get_setting("site_url", ""),
-                           tg_backup=tg_backup)
+                           tg_backup=tg_backup, shutdown_account=shutdown_account())
 
 
 # --------------------------------------------------------------------------- копия в Telegram
