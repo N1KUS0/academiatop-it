@@ -11,6 +11,7 @@
   <div class="actions">
     <a class="btn" href="{{ url_for('ticket_new', kind='problem', computer=pc.hostname) }}">Сообщить о проблеме</a>
     <a class="btn" href="{{ url_for('ticket_new', kind='install', computer=pc.hostname) }}">Запросить установку ПО</a>
+    <a class="btn" href="#history">История изменений{% if events %} ({{ events|length }}{{ '+' if more_events }}){% endif %}</a>
     {% if is_admin %}
     <a class="btn" href="{{ url_for('computer_edit', hostname=pc.hostname) }}">Изменить</a>
     <a class="btn" href="{{ url_for('computer_new', copy=pc.hostname) }}" title="Создать следующий ПК с такими же характеристиками">Копировать</a>

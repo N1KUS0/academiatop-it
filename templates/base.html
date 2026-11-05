@@ -25,6 +25,7 @@
       <a href="{{ url_for('computers') }}" class="{{ 'on' if ep.startswith('computer') }}">Компьютеры</a>
       <a href="{{ url_for('software_list') }}" class="{{ 'on' if ep.startswith('software') }}">Справочник ПО</a>
       <a href="{{ url_for('search') }}" class="{{ 'on' if ep == 'search' }}">Поиск</a>
+      <a href="{{ url_for('history_page') }}" class="{{ 'on' if ep == 'history_page' }}" title="История изменений на ПК">История</a>
       <a href="{{ url_for('tickets') }}" class="{{ 'on' if ep.startswith('ticket') }}">Заявки{% if tickets_unread %} <span class="nav-count" title="Заявки с новыми сообщениями">{{ tickets_unread }}</span>{% endif %}</a>
       {% if is_admin %}
         <a href="{{ url_for('import_page') }}" class="{{ 'on' if ep.startswith('import') }}">Импорт</a>
