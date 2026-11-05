@@ -283,7 +283,7 @@ def get_setting_safe(key):
 
 @app.cli.command("netmap-check")
 def netmap_check_command():
-    """Проверить, может ли сервер пинговать ПК для карты на главной."""
+    """Проверить, может ли сервер пинговать ПК для блока «ПК в сети» на главной."""
     targets = {}
     for c in list_computers():
         ip = netmap.ip_from_note(c["note"])
@@ -1954,8 +1954,19 @@ def ticket(ticket_id):
                               auditorium_id=t["auditorium_id"]) if t["is_open"] else []
     # Список ПК заявки: ссылки только на существующие компьютеры.
     pc_rows = [dict(hostname=h, exists=bool(find_computer(h))) for h in t["pcs"]]
+    # Кого касается заявка: автор первым, потом остальные по имени.
+    watchers = conn.execute(
+        USERS_SQL + """ JOIN ticket_watchers w ON w.user_id = u.id AND w.ticket_id = ?
+           ORDER BY u.id IS NOT ? , COALESCE(NULLIF(u.full_name, ''), u.username) COLLATE NOCASE""",
+        (ticket_id, t["author_id"])).fetchall()
+    # Администратор может добавить в заявку тех, кого она касается, но кто ещё не отметился.
+    candidates = conn.execute(
+        """SELECT id, username, full_name FROM users
+           WHERE id NOT IN (SELECT user_id FROM ticket_watchers WHERE ticket_id = ?)
+           ORDER BY COALESCE(NULLIF(full_name, ''), username) COLLATE NOCASE""",
+        (ticket_id,)).fetchall() if current_user()["admin"] else []
     return render_template("ticket.html", t=t, messages=messages, photos=photos, similar=similar, pc_rows=pc_rows,
-                           photo_max=PHOTO_MAX_FILES,
+                           watchers=watchers, candidates=candidates, photo_max=PHOTO_MAX_FILES,
                            install_total=len(targets), install_missing=missing,
                            can_write=t["is_open"] or current_user()["admin"] or bool(t["watching"]))
 
@@ -2039,6 +2050,36 @@ def ticket_watch(ticket_id):
     else:
         watch(conn, ticket_id, user["id"])
         flash("Отмечено: вас это тоже касается. Ответы по заявке будут приходить и вам.", "success")
+    conn.commit()
+    return redirect(url_for("ticket", ticket_id=ticket_id))
+
+
+@app.route("/tickets/<int:ticket_id>/watchers", methods=["POST"])
+@admin_required
+def ticket_watchers(ticket_id):
+    """Администратор добавляет в заявку пользователя, которого она касается, или убирает его."""
+    t = get_ticket_or_404(ticket_id)
+    conn = get_db()
+    try:
+        user_id = int(request.form.get("user_id", ""))
+    except ValueError:
+        user_id = None
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone() if user_id else None
+    if not row:
+        flash("Выберите пользователя.", "warning")
+        return redirect(url_for("ticket", ticket_id=ticket_id))
+    name = row["full_name"] or row["username"]
+    if request.form.get("action") == "remove":
+        if row["id"] == t["author_id"]:
+            flash("Автора заявки убрать нельзя.", "warning")
+        else:
+            conn.execute("DELETE FROM ticket_watchers WHERE ticket_id = ? AND user_id = ?", (ticket_id, row["id"]))
+            flash(f"{name} больше не в заявке.", "info")
+    else:
+        watch(conn, ticket_id, row["id"])
+        # Заявка появится у пользователя как непрочитанная — так он узнает, что его добавили.
+        conn.execute("UPDATE ticket_watchers SET unread = 1 WHERE ticket_id = ? AND user_id = ?", (ticket_id, row["id"]))
+        flash(f"{name} добавлен(а) в заявку: ответы по ней будут приходить и ему(ей).", "success")
     conn.commit()
     return redirect(url_for("ticket", ticket_id=ticket_id))
 

@@ -41,6 +41,47 @@
 </form>
 {% endif %}
 
+{% if watchers or is_admin %}
+<section class="card watchers">
+  <h3>Кого касается</h3>
+  <ul class="watcher-list">
+    {% for w in watchers %}
+    {% set wname = w.full_name or w.username %}
+    <li class="author">
+      {{ avatar(w.id, w.avatar, wname, 24) }}
+      <a href="{{ url_for('user_profile', user_id=w.id) }}">{{ wname }}</a>
+      {% if w.id == t.author_id %}<span class="muted small">автор</span>
+      {% elif is_admin %}
+      <form method="post" action="{{ url_for('ticket_watchers', ticket_id=t.id) }}" class="inline">
+        {{ csrf() }}<input type="hidden" name="action" value="remove"><input type="hidden" name="user_id" value="{{ w.id }}">
+        <button class="btn btn-link btn-sm watcher-remove" title="Убрать из заявки" aria-label="Убрать {{ wname }} из заявки">×</button>
+      </form>
+      {% endif %}
+    </li>
+    {% else %}
+    <li class="muted small">Пока никого: заявку создал администратор.</li>
+    {% endfor %}
+  </ul>
+  {% if is_admin %}
+    {% if candidates %}
+    <form method="post" action="{{ url_for('ticket_watchers', ticket_id=t.id) }}" class="form-row watcher-add">
+      {{ csrf() }}
+      <label class="grow">Добавить пользователя
+        <select name="user_id" required>
+          <option value="">— выберите —</option>
+          {% for u in candidates %}<option value="{{ u.id }}">{{ u.full_name or u.username }}{% if u.full_name %} ({{ u.username }}){% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      <button class="btn">Добавить</button>
+    </form>
+    <p class="muted small">Добавленный увидит заявку в «Мои и отслеживаемые» с отметкой «новое» и будет получать ответы по ней.</p>
+    {% else %}
+    <p class="muted small">Все пользователи уже в заявке.</p>
+    {% endif %}
+  {% endif %}
+</section>
+{% endif %}
+
 {% if similar %}
 <div class="card similar">
   <h3>Похожие открытые заявки</h3>

@@ -64,38 +64,6 @@
 </p>
 {% endif %}
 
-<section class="card netmap" id="netmap" data-url="{{ url_for('netmap_status') }}">
-  <div class="netmap-head">
-    <div>
-      <h2>Карта ПК в сети</h2>
-      <p class="muted small" id="netmap-summary">Проверяем, какие компьютеры включены…</p>
-    </div>
-    <button type="button" class="btn btn-sm" id="netmap-refresh">Обновить</button>
-  </div>
-  <div class="netmap-legend small">
-    <span><i class="net-pc-mark state-up"></i>в сети</span>
-    <span><i class="net-pc-mark state-down"></i>не отвечает</span>
-    <span><i class="net-pc-mark state-noip"></i>IP неизвестен</span>
-    <span><i class="net-pc-mark state-off"></i>списан</span>
-  </div>
-  {% for a in auditoriums %}
-  <div class="netmap-aud">
-    <a class="netmap-aud-name" href="{{ url_for('auditorium', code='AUD-' ~ a.num) }}">
-      <b>AUD-{{ a.num }}</b><span data-aud-count="{{ a.num }}">{{ a.pc_count }} ПК</span>
-    </a>
-    <div class="netmap-pcs">
-      {% for c in computers if c.auditorium_id == a.id %}
-        <a class="net-pc state-wait{{ ' is-repair' if c.status == 'repair' }}" data-host="{{ c.hostname }}" data-aud="{{ a.num }}"
-           data-label="{{ c.hostname }}{% if c.ip %} · {{ c.ip }}{% endif %}{% if c.status == 'repair' %} · в ремонте{% endif %}"
-           href="{{ url_for('computer', hostname=c.hostname) }}"
-           title="{{ c.hostname }}{% if c.ip %} · {{ c.ip }}{% endif %}">{{ '%02d'|format(c.num) }}</a>
-      {% else %}
-        <span class="muted small">Компьютеров пока нет</span>
-      {% endfor %}
-    </div>
-  </div>
-  {% endfor %}
-</section>
 
 <div class="grid-2">
   <section class="card">
@@ -129,4 +97,37 @@
     {% else %}<p class="muted">Нет установок с указанной датой.</p>{% endif %}
   </section>
 </div>
+
+<section class="card netmap" id="netmap" data-url="{{ url_for('netmap_status') }}">
+  <div class="netmap-head">
+    <div>
+      <h2>ПК в сети</h2>
+      <p class="muted small" id="netmap-summary">Проверяем, какие компьютеры включены…</p>
+    </div>
+    <button type="button" class="btn btn-sm" id="netmap-refresh">Обновить</button>
+  </div>
+  <div class="netmap-legend small">
+    <span><i class="net-pc-mark state-up"></i>в сети</span>
+    <span><i class="net-pc-mark state-down"></i>не отвечает</span>
+    <span><i class="net-pc-mark state-noip"></i>IP неизвестен</span>
+    <span><i class="net-pc-mark state-off"></i>списан</span>
+  </div>
+  {% for a in auditoriums %}
+  <div class="netmap-aud">
+    <a class="netmap-aud-name" href="{{ url_for('auditorium', code='AUD-' ~ a.num) }}">
+      <b>AUD-{{ a.num }}</b><span data-aud-count="{{ a.num }}">{{ a.pc_count }} ПК</span>
+    </a>
+    <div class="netmap-pcs">
+      {% for c in computers if c.auditorium_id == a.id %}
+        <a class="net-pc state-wait{{ ' is-repair' if c.status == 'repair' }}" data-host="{{ c.hostname }}" data-aud="{{ a.num }}"
+           data-label="{{ c.hostname }}{% if c.ip %} · {{ c.ip }}{% endif %}{% if c.status == 'repair' %} · в ремонте{% endif %}"
+           href="{{ url_for('computer', hostname=c.hostname) }}"
+           title="{{ c.hostname }}{% if c.ip %} · {{ c.ip }}{% endif %}">{{ '%02d'|format(c.num) }}</a>
+      {% else %}
+        <span class="muted small">Компьютеров пока нет</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</section>
 {% endblock %}

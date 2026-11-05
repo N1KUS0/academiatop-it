@@ -179,6 +179,12 @@ h1 .badge { font-family: "Segoe UI", Roboto, sans-serif; font-size: 13px; }
 .similar ul { margin: 0; padding-left: 18px; }
 .similar li { margin: 4px 0; }
 .watch-box { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.watchers h3 { margin-top: 0; }
+.watcher-list { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.watcher-list li { display: inline-flex; align-items: center; gap: 6px; }
+.watcher-remove { min-height: 24px; padding: 0 6px; font-size: 16px; line-height: 1; color: var(--muted); }
+.watcher-remove:hover { color: var(--bad); }
+.watcher-add { margin-top: 12px; }
 .ok-text { color: var(--ok); }
 .home-tickets { border-top: 4px solid var(--accent); }
 .home-tickets-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
