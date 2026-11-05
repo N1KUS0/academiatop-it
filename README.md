@@ -198,6 +198,31 @@ cd /opt/registry && sudo -u registry REGISTRY_DB=/opt/registry/instance/registry
   echo '15 3 * * * root /opt/registry/deploy/backup.sh' | sudo tee /etc/cron.d/registry-backup
   ```
 
+### Копия в Telegram (каждый день в 00:00)
+
+Каждый день в 00:00 по времени сервера бот присылает в чат уведомлений о заявках файл `registry-ГГГГ-ММ-ДД_ЧЧ-ММ.db.gz`. Это вся база `registry.db`, сжатая gzip: компьютеры, ПО, заявки с фото, пользователи и аватарки. В подписи — дата и сколько в базе ПК, программ, заявок и пользователей.
+
+- Работает, если Telegram настроен на странице «Данные». Там же видно, когда копия ушла в последний раз и с каким результатом, и есть кнопка **«Отправить копию сейчас»**.
+- **Чат должен быть закрытым**: в базе есть хеши паролей пользователей. Если уведомления приходят в группу, в ней должны быть только администраторы.
+- Если сжатая база больше 50 МБ (столько Telegram принимает от ботов), придёт JSON-копия — без пользователей, фото и аватарок, с предупреждением в подписи. Полные копии остаются на сервере в `/var/backups/registry`.
+- Если отправить не удалось, бот пришлёт сообщение об ошибке, а она запишется в журнал.
+- Расписание — таймер systemd `registry-backup.timer`. Его ставят `deploy/install.sh` и `deploy/update.sh`. Если сервер был выключен в полночь, копия уйдёт после включения. Проверить таймер и время сервера:
+  ```bash
+  systemctl list-timers registry-backup.timer && timedatectl | grep "Time zone"
+  ```
+  ```bash
+  sudo journalctl -u registry-backup -n 20
+  ```
+
+**Восстановление из копии из Telegram:** скачайте файл, скопируйте его на сервер (например, в домашнюю папку) и выполните:
+```bash
+gunzip registry-2026-11-05_00-00.db.gz
+```
+```bash
+sudo systemctl stop registry && sudo cp /opt/registry/instance/registry.db /var/backups/registry/before-restore-$(date +%F-%H%M%S).db && sudo cp registry-2026-11-05_00-00.db /opt/registry/instance/registry.db && sudo chown registry:registry /opt/registry/instance/registry.db && sudo systemctl start registry
+```
+Текущая база перед заменой сохраняется в `/var/backups/registry/before-restore-*.db`. JSON-копию (`*.json.gz`) распакуйте и загрузите на странице «Данные» → «Восстановление».
+
 ## Полезные команды
 
 ```bash

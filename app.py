@@ -1,11 +1,14 @@
 """Академия ТОП — IT-портал: компьютеры, ПО, заявки."""
 import csv
+import gzip
 import hashlib
 import io
 import json
 import os
 import secrets
 import sqlite3
+import tempfile
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
@@ -1423,18 +1426,144 @@ BACKUP_TABLES = ["auditoriums", "computers", "software", "installations", "sw_al
 @admin_required
 def data_page():
     token = db.get_setting("telegram_token", "")
+    try:
+        tg_backup = json.loads(db.get_setting("telegram_backup_last", "") or "null")
+    except ValueError:
+        tg_backup = None
     return render_template("data.html", tg_token_tail=token[-4:] if token else "",
-                           tg_chat=db.get_setting("telegram_chat", ""), site_url=db.get_setting("site_url", ""))
+                           tg_chat=db.get_setting("telegram_chat", ""), site_url=db.get_setting("site_url", ""),
+                           tg_backup=tg_backup)
+
+
+# --------------------------------------------------------------------------- копия в Telegram
+
+TG_FILE_LIMIT = 49 * 1024 * 1024  # Bot API принимает файлы до 50 МБ
+_tg_backup_lock = threading.Lock()
+
+
+def human_size(n):
+    return f"{n / 1024 / 1024:.1f} МБ" if n >= 1024 * 1024 else f"{max(1, round(n / 1024))} КБ"
+
+
+def telegram_configured():
+    return bool(db.get_setting("telegram_token", "") and db.get_setting("telegram_chat", ""))
+
+
+def save_backup_status(ok, info):
+    db.set_setting("telegram_backup_last", json.dumps(
+        {"at": datetime.now().strftime("%d.%m.%Y %H:%M"), "ok": ok, "info": info}, ensure_ascii=False))
+
+
+def send_backup_to_telegram():
+    """Копия базы в Telegram, в чат уведомлений о заявках. -> «файл, размер»; ошибка — RuntimeError.
+
+    Отправляется сама база registry.db (с фото и аватарками), сжатая gzip. Если она больше 50 МБ — JSON-копия.
+    Результат запоминается в настройке telegram_backup_last, его видно на странице «Данные».
+    """
+    if not telegram_configured():
+        raise RuntimeError("Telegram не настроен: укажите токен бота и chat id на странице «Данные».")
+    if not _tg_backup_lock.acquire(blocking=False):
+        raise RuntimeError("Копия уже отправляется, подождите.")
+    try:
+        token, chat = db.get_setting("telegram_token", ""), db.get_setting("telegram_chat", "")
+        now = datetime.now()
+        stamp, shown = now.strftime("%Y-%m-%d_%H-%M"), now.strftime("%d.%m.%Y %H:%M")
+        conn = get_db()
+        counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                  for t in ("computers", "software", "tickets", "users")}
+        summary = (f"ПК: {counts['computers']}, программ: {counts['software']}, "
+                   f"заявок: {counts['tickets']}, пользователей: {counts['users']}")
+        # Согласованная копия работающей базы средствами SQLite, затем gzip.
+        fd, tmp = tempfile.mkstemp(prefix="tg-backup-", suffix=".db", dir=os.path.dirname(app.config["DATABASE"]))
+        os.close(fd)
+        try:
+            dest = sqlite3.connect(tmp)
+            conn.backup(dest)
+            dest.close()
+            with open(tmp, "rb") as f:
+                content = gzip.compress(f.read(), compresslevel=6)
+        finally:
+            os.remove(tmp)
+        if len(content) <= TG_FILE_LIMIT:
+            filename = f"registry-{stamp}.db.gz"
+            caption = (f"💾 <b>{SITE_NAME}</b>: резервная копия базы на {shown}\n{summary}\n"
+                       f"Как восстановить — в README, раздел «Резервные копии».")
+        else:
+            big = human_size(len(content))
+            content = gzip.compress(backup_json().encode("utf-8"))
+            filename = f"registry-backup-{stamp}.json.gz"
+            caption = (f"💾 <b>{SITE_NAME}</b>: резервная копия на {shown}\n{summary}\n"
+                       f"⚠️ База ({big}) больше 50 МБ, поэтому отправлена JSON-копия без пользователей, "
+                       f"фото и аватарок. Полные копии — на сервере в /var/backups/registry.")
+        try:
+            telegram.send_document(token, chat, filename, content, caption)
+        except RuntimeError as e:
+            raise RuntimeError(f"Telegram: {e}") from None
+        result = f"{filename}, {human_size(len(content))}"
+        save_backup_status(True, result)
+        app.logger.warning("telegram backup: sent %s", result)
+        return result
+    except Exception as e:
+        save_backup_status(False, str(e))
+        app.logger.error("telegram backup: %s", e)
+        raise
+    finally:
+        _tg_backup_lock.release()
+
+
+@app.cli.command("send-backup")
+def send_backup_command():
+    """Отправить копию базы в Telegram (её запускает таймер registry-backup.timer каждый день в 00:00)."""
+    if not telegram_configured():
+        click.echo("Telegram не настроен — копия не отправлена.")
+        return
+    try:
+        click.echo(f"Отправлено: {send_backup_to_telegram()}")
+    except Exception as e:
+        try:  # если сам Telegram доступен, сообщим об ошибке туда же
+            telegram.send(db.get_setting("telegram_token", ""), db.get_setting("telegram_chat", ""),
+                          f"⚠️ {SITE_NAME}: не удалось отправить резервную копию: {e}")
+        except RuntimeError:
+            pass
+        raise click.ClickException(str(e))
+
+
+@app.route("/settings/telegram/backup", methods=["POST"])
+@admin_required
+def telegram_backup_now():
+    """«Отправить копию сейчас» — в фоне, чтобы страница не ждала загрузку файла."""
+    if not telegram_configured():
+        flash("Сначала настройте Telegram: токен бота и chat id.", "danger")
+        return redirect(url_for("data_page") + "#tg-backup")
+    if _tg_backup_lock.locked():
+        flash("Копия уже отправляется, подождите.", "info")
+        return redirect(url_for("data_page") + "#tg-backup")
+
+    def run():
+        with app.app_context():
+            try:
+                send_backup_to_telegram()
+            except Exception:
+                pass  # ошибка уже записана в журнал и в статус на странице «Данные»
+
+    threading.Thread(target=run, daemon=True).start()
+    flash("Копия базы отправляется в Telegram. Обновите страницу через минуту — здесь появится результат.", "success")
+    return redirect(url_for("data_page") + "#tg-backup")
+
+
+def backup_json():
+    """Копия данных в JSON (без пользователей, фото и аватарок) — та же, что «Скачать копию (JSON)»."""
+    conn = get_db()
+    payload = {"format": "top-software-registry", "version": 1, "created": date.today().isoformat()}
+    for t in BACKUP_TABLES:
+        payload[t] = [dict(r) for r in conn.execute(f"SELECT * FROM {t} ORDER BY rowid")]
+    return json.dumps(payload, ensure_ascii=False, indent=1)
 
 
 @app.route("/backup.json")
 @admin_required
 def backup():
-    conn = get_db()
-    payload = {"format": "top-software-registry", "version": 1, "created": date.today().isoformat()}
-    for t in BACKUP_TABLES:
-        payload[t] = [dict(r) for r in conn.execute(f"SELECT * FROM {t} ORDER BY rowid")]
-    return Response(json.dumps(payload, ensure_ascii=False, indent=1), mimetype="application/json",
+    return Response(backup_json(), mimetype="application/json",
                     headers={"Content-Disposition":
                              f"attachment; filename=registry-backup-{date.today().isoformat()}.json"})
 

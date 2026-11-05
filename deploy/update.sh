@@ -50,6 +50,10 @@ fi
 SERVICE_CHANGED=0; NGINX_CHANGED=0
 cmp -s "$SRC_DIR/deploy/registry.service" /etc/systemd/system/registry.service || SERVICE_CHANGED=1
 cmp -s "$SRC_DIR/deploy/nginx-registry.conf" /etc/nginx/sites-available/registry || NGINX_CHANGED=1
+BACKUP_TIMER_CHANGED=0
+for unit in registry-backup.service registry-backup.timer; do
+    cmp -s "$SRC_DIR/deploy/$unit" "/etc/systemd/system/$unit" || BACKUP_TIMER_CHANGED=1
+done
 
 # Зависимости ставим до копирования: если pip не сработает, сайт останется на прежней версии,
 # а следующий запуск попробует снова. Уже установленное pip не скачивает заново — это быстро.
@@ -69,6 +73,13 @@ if [ "$SERVICE_CHANGED" = 1 ]; then
     echo "==> systemd: служба изменилась"
     $SUDO cp "$APP_DIR/deploy/registry.service" /etc/systemd/system/registry.service
     $SUDO systemctl daemon-reload
+fi
+
+if [ "$BACKUP_TIMER_CHANGED" = 1 ]; then
+    echo "==> systemd: копия базы в Telegram каждый день в 00:00"
+    $SUDO cp "$APP_DIR/deploy/registry-backup.service" "$APP_DIR/deploy/registry-backup.timer" /etc/systemd/system/
+    $SUDO systemctl daemon-reload
+    $SUDO systemctl enable --now registry-backup.timer
 fi
 
 echo "==> Перезапуск"

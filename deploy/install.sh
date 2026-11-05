@@ -38,6 +38,10 @@ cp "$APP_DIR/deploy/registry.service" /etc/systemd/system/registry.service
 systemctl daemon-reload
 systemctl enable --now registry
 systemctl restart registry
+# Копия базы в Telegram каждый день в 00:00 (если Telegram настроен на странице «Данные»)
+cp "$APP_DIR/deploy/registry-backup.service" "$APP_DIR/deploy/registry-backup.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now registry-backup.timer
 
 echo "==> nginx"
 cp "$APP_DIR/deploy/nginx-registry.conf" /etc/nginx/sites-available/registry

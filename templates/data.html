@@ -61,5 +61,21 @@
       {% endif %}
     </div>
   </form>
+
+  <h3 id="tg-backup">Резервная копия в Telegram</h3>
+  <p class="muted small">Каждый день в 00:00 сервер отправляет в этот же чат копию базы <code>registry.db</code>
+    (сжатую, со всеми данными, фото и аватарками). В базе есть хеши паролей, поэтому чат должен быть закрытым —
+    только для администраторов.</p>
+  <p class="small">
+    {% if tg_backup %}Последняя отправка: <b>{{ tg_backup.at }}</b>
+      {% if tg_backup.ok %}<span class="badge status-active">OK</span> <span class="muted">{{ tg_backup.info }}</span>
+      {% else %}<span class="badge lic-commercial">ошибка</span> {{ tg_backup.info }}{% endif %}
+    {% else %}<span class="muted">Копия ещё не отправлялась.</span>{% endif %}
+  </p>
+  {% if tg_token_tail and tg_chat %}
+  <form method="post" action="{{ url_for('telegram_backup_now') }}" class="inline">
+    {{ csrf() }}<button class="btn">Отправить копию сейчас</button>
+  </form>
+  {% endif %}
 </section>
 {% endblock %}

@@ -1,6 +1,7 @@
 """Уведомления администратору в Telegram через бота (Bot API, без сторонних библиотек)."""
 import json
 import logging
+import secrets
 import threading
 import urllib.error
 import urllib.parse
@@ -11,12 +12,26 @@ TIMEOUT = 10
 log = logging.getLogger(__name__)
 
 
-def call(token, method, **params):
-    """Вызов метода Bot API. Возвращает result или бросает RuntimeError с понятным текстом."""
-    data = urllib.parse.urlencode(params).encode()
-    req = urllib.request.Request(API.format(token=token, method=method), data=data)
+def call(token, method, _file=None, _timeout=TIMEOUT, **params):
+    """Вызов метода Bot API. Возвращает result или бросает RuntimeError с понятным текстом.
+
+    _file — (поле, имя файла, байты): тогда запрос уходит как multipart/form-data.
+    """
+    url = API.format(token=token, method=method)
+    if _file:
+        boundary = secrets.token_hex(16)
+        parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode()
+                 for key, value in params.items()]
+        field, filename, content = _file
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'
+                     f'Content-Type: application/octet-stream\r\n\r\n'.encode() + content + b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode())
+        req = urllib.request.Request(url, data=b"".join(parts),
+                                     headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    else:
+        req = urllib.request.Request(url, data=urllib.parse.urlencode(params).encode())
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=_timeout) as resp:
             payload = json.load(resp)
     except urllib.error.HTTPError as e:
         try:
@@ -28,6 +43,7 @@ def call(token, method, **params):
     if not payload.get("ok"):
         desc = payload.get("description", "неизвестная ошибка")
         hints = {"Unauthorized": "неверный токен бота",
+                 "Request Entity Too Large": "файл больше 50 МБ — Telegram такие от ботов не принимает",
                  "Bad Request: chat not found": "chat id не найден — напишите боту и нажмите «Найти chat id»"}
         raise RuntimeError(hints.get(desc, desc))
     return payload["result"]
@@ -36,6 +52,12 @@ def call(token, method, **params):
 def send(token, chat_id, text):
     call(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
          disable_web_page_preview="true")
+
+
+def send_document(token, chat_id, filename, content, caption=""):
+    """Файл в чат (до 50 МБ — ограничение Bot API). Загрузка может идти долго, поэтому таймаут больше."""
+    call(token, "sendDocument", _file=("document", filename, content), _timeout=300,
+         chat_id=chat_id, caption=caption[:1024], parse_mode="HTML")
 
 
 def send_async(token, chat_id, text):

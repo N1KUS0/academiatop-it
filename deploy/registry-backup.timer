@@ -1,0 +1,10 @@
+[Unit]
+Description=Академия ТОП — копия базы в Telegram каждый день в 00:00
+
+[Timer]
+OnCalendar=*-*-* 00:00:00
+# Если сервер был выключен в полночь — отправить после включения.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
