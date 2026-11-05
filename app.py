@@ -281,6 +281,31 @@ def get_setting_safe(key):
     return db.get_setting(key, "")
 
 
+@app.cli.command("netmap-check")
+def netmap_check_command():
+    """Проверить, может ли сервер пинговать ПК для карты на главной."""
+    targets = {}
+    for c in list_computers():
+        ip = netmap.ip_from_note(c["note"])
+        if ip and c["status"] != "decommissioned":
+            targets[c["hostname"]] = ip
+    click.echo(f"ПК с IP: {len(targets)}")
+    if not targets:
+        return
+    steps = []
+    try:
+        alive = netmap.ping_many(targets.values(), explain=steps)
+    except netmap.PingUnavailable as e:
+        alive = None
+        steps.append(str(e))
+    for s in steps:
+        click.echo(f"  {s}")
+    if alive is not None:
+        click.echo(f"В сети: {sum(ip in alive for ip in targets.values())} из {len(targets)}")
+        for host, ip in sorted(targets.items()):
+            click.echo(f"  {host:10} {ip:15} {str(alive[ip]) + ' мс' if ip in alive else 'не отвечает'}")
+
+
 @app.cli.command("set-password")
 @click.option("--username", default="admin", show_default=True)
 @click.password_option(prompt="Новый пароль администратора")
@@ -804,7 +829,7 @@ def netmap_status():
         ip = netmap.ip_from_note(c["note"])
         if ip and c["status"] != "decommissioned":
             targets[c["hostname"]] = ip
-    alive, checked_at = netmap.check(targets.values())
+    alive, checked_at, error = netmap.check(targets.values())
     pcs = {}
     for c in computers:
         host = c["hostname"]
@@ -812,11 +837,13 @@ def netmap_status():
             pcs[host] = {"state": "off"}
         elif host not in targets:
             pcs[host] = {"state": "noip"}
+        elif error:
+            pcs[host] = {"state": "wait"}  # неизвестно: сервер не смог пинговать
         elif targets[host] in alive:
             pcs[host] = {"state": "up", "ms": alive[targets[host]]}
         else:
             pcs[host] = {"state": "down"}
-    resp = jsonify(checked_at=datetime.fromtimestamp(checked_at).strftime("%H:%M:%S"), pcs=pcs)
+    resp = jsonify(checked_at=datetime.fromtimestamp(checked_at).strftime("%H:%M:%S"), pcs=pcs, error=error)
     resp.headers["Cache-Control"] = "no-store"
     return resp
 

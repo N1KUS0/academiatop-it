@@ -12,6 +12,8 @@ Restart=on-failure
 
 # Защита: сервис может писать только в каталог с базой
 NoNewPrivileges=true
+# Право отправлять ping для карты ПК в сети на главной (только оно, root не нужен)
+AmbientCapabilities=CAP_NET_RAW
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true

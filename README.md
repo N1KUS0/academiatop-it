@@ -38,7 +38,12 @@
   ```bash
   netsh advfirewall firewall add rule name="ICMP Echo (портал)" protocol=icmpv4:8,any dir=in action=allow
   ```
-- Сервер пингует без прав root: Debian 12 разрешает это всем пользователям (`sysctl net.ipv4.ping_group_range` — `0 2147483647`).
+- Сервер пингует без прав root: служба `registry` получает только право на ICMP (`AmbientCapabilities=CAP_NET_RAW` в `deploy/registry.service`). Обычная команда `ping` в консоли тут не показатель — у неё это право своё, а у службы без него ping не работает. Если сервер пинговать не может, на карте вместо статусов будет сообщение об ошибке.
+- **Проверка на сервере** — какой способ пинга работает с правами службы и какие ПК отвечают:
+  ```bash
+  sudo systemd-run --pipe --wait -q -p User=registry -p NoNewPrivileges=true -p AmbientCapabilities=CAP_NET_RAW -p WorkingDirectory=/opt/registry -E REGISTRY_DB=/opt/registry/instance/registry.db /opt/registry/.venv/bin/flask --app app netmap-check
+  ```
+  Через `sudo -u registry …` проверять не стоит: там команда `ping` работает со своими правами, и проверка пройдёт, даже если у службы ping не работает.
 
 ## Установка на Debian 12
 

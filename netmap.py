@@ -1,11 +1,13 @@
 """Карта ПК в сети: какие компьютеры сейчас отвечают на ping.
 
 IP компьютера берётся из примечания («IP: 10.0.3.15» — его пишет автовыгрузка инвентаризации,
-можно вписать и вручную). На Linux все ПК пингуются разом через один ICMP-сокет без прав root
-(Debian разрешает их всем через net.ipv4.ping_group_range), иначе — командой ping параллельно.
+можно вписать и вручную). На Linux все ПК пингуются разом через один ICMP-сокет: обычный (если
+net.ipv4.ping_group_range разрешает) или raw (служба registry получает для этого CAP_NET_RAW),
+в крайнем случае — командой ping параллельно.
 Результат кэшируется на CACHE_SECONDS, чтобы главная страница у многих людей не пинговала сеть каждый раз.
 """
 import ipaddress
+import logging
 import os
 import re
 import select
@@ -23,7 +25,8 @@ _IP_RE = re.compile(r"\bIP:\s*([^;]+)", re.IGNORECASE)
 _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 _lock = threading.Lock()
-_cache = {"at": 0.0, "key": None, "result": {}}
+_cache = {"at": 0.0, "key": None, "result": {}, "error": None}
+log = logging.getLogger(__name__)
 
 
 def ip_from_note(note):
@@ -50,20 +53,27 @@ def _checksum(data):
     return ~s & 0xFFFF
 
 
-def _ping_socket(ips, timeout):
-    """Все адреса одним ICMP-сокетом (SOCK_DGRAM, Linux). {ip: время ответа в мс}."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_ICMP)
+def _ping_socket(ips, timeout, raw):
+    """Все адреса одним ICMP-сокетом. {ip: время ответа в мс}.
+
+    raw=False — SOCK_DGRAM: без прав, если группа пользователя входит в net.ipv4.ping_group_range;
+    raw=True  — SOCK_RAW: нужен CAP_NET_RAW (его даёт служба registry, см. deploy/registry.service).
+    """
+    kind = socket.SOCK_RAW if raw else socket.SOCK_DGRAM
+    sock = socket.socket(socket.AF_INET, kind, socket.IPPROTO_ICMP)
+    ident = os.getpid() & 0xFFFF  # у SOCK_DGRAM идентификатор всё равно ставит ядро
     try:
         sock.setblocking(False)
         sent, alive = {}, {}
+        seq_of = {ip: n for n, ip in enumerate(ips, 1)}
 
         def send_all(only_missing):
-            for seq, ip in enumerate(ips, 1):
+            for ip, seq in seq_of.items():
                 if only_missing and ip in alive:
                     continue
                 payload = b"academiatop-netmap"
-                header = struct.pack("!BBHHH", 8, 0, 0, 0, seq & 0xFFFF)  # идентификатор ставит ядро
-                packet = struct.pack("!BBHHH", 8, 0, _checksum(header + payload), 0, seq & 0xFFFF) + payload
+                header = struct.pack("!BBHHH", 8, 0, 0, ident, seq & 0xFFFF)
+                packet = struct.pack("!BBHHH", 8, 0, _checksum(header + payload), ident, seq & 0xFFFF) + payload
                 try:
                     sock.sendto(packet, (ip, 0))
                     sent.setdefault(ip, time.monotonic())
@@ -85,16 +95,27 @@ def _ping_socket(ips, timeout):
                 continue
             while True:
                 try:
-                    data, (src, _port) = sock.recvfrom(1024)
-                except BlockingIOError:
+                    data, (src, _port) = sock.recvfrom(2048)
+                except OSError:  # нет данных (BlockingIOError) или пришла ошибка ICMP
                     break
-                except OSError:
-                    break
+                if raw:  # в raw-сокет приходит и IP-заголовок, и чужие ICMP-пакеты
+                    data = data[(data[0] & 0x0F) * 4:] if data else b""
+                    if len(data) < 8 or struct.unpack("!H", data[4:6])[0] != ident:
+                        continue
                 if data and data[0] == 0 and src in sent and src not in alive:  # echo reply
                     alive[src] = round((time.monotonic() - sent[src]) * 1000, 1)
+        if not sent:
+            raise OSError("не удалось отправить ни одного ICMP-пакета")
         return alive
     finally:
         sock.close()
+
+
+class PingUnavailable(Exception):
+    """Сервер не может пинговать: нет прав на ICMP."""
+
+
+_ERROR = object()
 
 
 def _ping_command(ip, timeout):
@@ -105,39 +126,62 @@ def _ping_command(ip, timeout):
     try:
         started = time.monotonic()
         r = subprocess.run(cmd, capture_output=True, timeout=timeout + 2)
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
         return None
+    except OSError:
+        return _ERROR
     # Windows возвращает 0 и на «Заданный узел недоступен», поэтому смотрим на TTL в ответе.
     if r.returncode == 0 and b"TTL=" in r.stdout.upper():
         return round((time.monotonic() - started) * 1000, 1)
-    return None
+    # Linux: 1 — ответа нет, 2 и больше — ошибка самого ping (например, «Operation not permitted»).
+    return _ERROR if os.name != "nt" and r.returncode >= 2 else None
 
 
 def _ping_commands(ips, timeout):
     with ThreadPoolExecutor(max_workers=min(64, len(ips))) as pool:
-        results = pool.map(lambda ip: _ping_command(ip, timeout), ips)
-    return {ip: ms for ip, ms in zip(ips, results) if ms is not None}
+        results = list(pool.map(lambda ip: _ping_command(ip, timeout), ips))
+    if all(ms is _ERROR for ms in results):
+        raise PingUnavailable("команда ping не работает от имени службы")
+    return {ip: ms for ip, ms in zip(ips, results) if ms is not None and ms is not _ERROR}
 
 
-def ping_many(ips, timeout=TIMEOUT):
-    """{ip: мс} для ответивших адресов."""
+def ping_many(ips, timeout=TIMEOUT, explain=None):
+    """{ip: мс} для ответивших адресов. Если пинговать нечем — PingUnavailable.
+
+    explain — список, куда записывается, какие способы пробовались (для команды netmap-check).
+    """
     ips = sorted(set(ips))
     if not ips:
         return {}
-    if hasattr(socket, "IPPROTO_ICMP") and os.name != "nt":
-        try:
-            return _ping_socket(ips, timeout)
-        except PermissionError:
-            pass  # ping_group_range запрещает — пробуем командой ping
-    return _ping_commands(ips, timeout)
+    note = explain.append if explain is not None else (lambda _msg: None)
+    if os.name != "nt" and hasattr(socket, "IPPROTO_ICMP"):
+        for raw, name in ((False, "ICMP-сокет без прав (ping_group_range)"), (True, "raw ICMP-сокет (CAP_NET_RAW)")):
+            try:
+                result = _ping_socket(ips, timeout, raw)
+                note(f"{name}: работает")
+                return result
+            except OSError as e:
+                note(f"{name}: {e}")
+    try:
+        result = _ping_commands(ips, timeout)
+        note("команда ping: работает")
+        return result
+    except PingUnavailable as e:
+        note(f"команда ping: {e}")
+        raise PingUnavailable("Сервер не может отправлять ping: у службы нет прав на ICMP. "
+                              "Обновите сайт (deploy/update.sh) — служба получит CAP_NET_RAW.") from None
 
 
 def check(ips):
-    """Как ping_many, но с кэшем на CACHE_SECONDS. Возвращает (результат, время проверки)."""
+    """Как ping_many, но с кэшем на CACHE_SECONDS. Возвращает (результат, время проверки, ошибка или None)."""
     key = tuple(sorted(set(ips)))
     with _lock:
         if _cache["key"] == key and time.time() - _cache["at"] < CACHE_SECONDS:
-            return _cache["result"], _cache["at"]
-        result = ping_many(key)
-        _cache.update(at=time.time(), key=key, result=result)
-        return result, _cache["at"]
+            return _cache["result"], _cache["at"], _cache["error"]
+        try:
+            result, error = ping_many(key), None
+        except PingUnavailable as e:
+            result, error = {}, str(e)
+            log.error("netmap: %s", e)
+        _cache.update(at=time.time(), key=key, result=result, error=error)
+        return result, _cache["at"], error

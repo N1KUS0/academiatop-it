@@ -306,7 +306,8 @@ document.querySelectorAll('input[type="password"]').forEach(function (input) {
   var summary = document.getElementById("netmap-summary");
   var button = document.getElementById("netmap-refresh");
   var tiles = map.querySelectorAll(".net-pc[data-host]");
-  var TEXT = { up: "в сети", down: "не отвечает", noip: "IP неизвестен — впишите «IP: …» в примечание", off: "списан" };
+  var TEXT = { up: "в сети", down: "не отвечает", noip: "IP неизвестен — впишите «IP: …» в примечание", off: "списан",
+              wait: "не проверен" };
   var busy = false, timer = null;
 
   function apply(data) {
@@ -316,14 +317,17 @@ document.querySelectorAll('input[type="password"]').forEach(function (input) {
       el.className = el.className.replace(/\bstate-\w+/, "state-" + info.state);
       el.title = el.dataset.label + " — " + TEXT[info.state] + (info.ms != null ? " (" + info.ms + " мс)" : "");
       var a = perAud[el.dataset.aud] || (perAud[el.dataset.aud] = { up: 0, total: 0 });
-      if (info.state !== "off") { total++; a.total++; }
+      if (info.state !== "off" && info.state !== "wait") { total++; a.total++; }
       if (info.state === "up") { up++; a.up++; }
     });
     Object.keys(perAud).forEach(function (num) {
       var span = map.querySelector('[data-aud-count="' + num + '"]');
-      if (span) span.textContent = perAud[num].up + " из " + perAud[num].total + " в сети";
+      if (span && !data.error) span.textContent = perAud[num].up + " из " + perAud[num].total + " в сети";
     });
-    summary.textContent = "В сети " + up + " из " + total + " ПК · проверено в " + data.checked_at;
+    summary.textContent = data.error
+      ? data.error
+      : "В сети " + up + " из " + total + " ПК · проверено в " + data.checked_at;
+    summary.classList.toggle("netmap-error", !!data.error);
   }
 
   function refresh() {

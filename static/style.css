@@ -419,6 +419,7 @@ form.drop-target { outline: 2px dashed var(--accent); outline-offset: 4px; }
 .state-off { background: #eceef1; color: #b0b4bc; }
 .net-pc.state-off { text-decoration: line-through; }
 .state-wait { background: #eef0f3; color: var(--muted); }
+.netmap-error { color: var(--bad); }
 .net-pc.is-repair { box-shadow: inset 0 -3px 0 var(--warn); }
 .netmap.is-loading .net-pc.state-wait { animation: netmap-pulse 1.2s ease-in-out infinite; }
 @keyframes netmap-pulse { 50% { opacity: .45; } }
