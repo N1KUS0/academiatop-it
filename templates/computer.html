@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import csrf, status_badge, cat_badge, lic_badge, delete_button, author_link %}
+{% from "macros.html" import csrf, status_badge, cat_badge, lic_badge, delete_button, author_link, history_list %}
 {% block title %}{{ pc.hostname }}{% endblock %}
 {% block content %}
 <nav class="crumbs">
@@ -96,6 +96,17 @@
 </div>
 {% else %}
 <div class="card empty">На этом компьютере пока не отмечено ни одной программы.</div>
+{% endif %}
+
+
+<h2 id="history">История изменений</h2>
+{% if events %}
+<div class="card">
+  {{ history_list(events, show_pc=False) }}
+  {% if more_events %}<p class="small" style="margin:8px 0 0"><a href="{{ url_for('history_page', pc=pc.hostname) }}">Вся история →</a></p>{% endif %}
+</div>
+{% else %}
+<div class="card empty">Изменений пока не было. Они появятся после следующей автовыгрузки или правки вручную.</div>
 {% endif %}
 
 {% if is_admin %}

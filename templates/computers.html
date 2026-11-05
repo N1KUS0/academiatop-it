@@ -6,6 +6,7 @@
   <h1>Компьютеры <small class="muted">{{ computers|length }}</small></h1>
   <div class="actions">
     {% if is_admin %}<a class="btn btn-primary" href="{{ url_for('computer_new') }}">+ Компьютер</a>{% endif %}
+    <a class="btn" href="{{ url_for('history_page', aud=aud) }}">История изменений</a>
     <a class="btn" href="{{ url_for('export', kind='computers', fmt='xlsx') }}">Excel</a>
   </div>
 </div>

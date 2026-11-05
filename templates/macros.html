@@ -41,6 +41,54 @@
   {%- if with_avatar and t.author_id %}</span>{% endif -%}
 {%- endmacro %}
 
+{# Строка истории изменений на ПК. show_pc — показывать ли, на каком ПК (в общей ленте). #}
+{% macro history_event(h, show_pc=True) -%}
+  <li class="hist hist-{{ h.kind }}">
+    <span class="hist-time">{{ h.at[11:16] }}</span>
+    {% if show_pc %}<span class="mono hist-pc">
+      {%- if h.pc_link %}<a href="{{ url_for('computer', hostname=h.pc_link) }}">{{ h.pc_link }}</a>
+      {%- else %}{{ h.hostname }}{% endif %}</span>{% endif %}
+    <span class="hist-text">
+    {%- if h.kind == 'sw_added' -%}
+      Установлена <b>{{ h.field }}</b>{% if h.new %} {{ h.new }}{% endif %}
+      {%- if h.date and h.date != h.at[:10] %} <span class="muted small">· дата установки {{ h.date | ru_date }}</span>{% endif %}
+    {%- elif h.kind == 'sw_removed' -%}
+      Удалена <b>{{ h.field }}</b>{% if h.old %} {{ h.old }}{% endif %}
+    {%- elif h.kind == 'sw_updated' -%}
+      <b>{{ h.field }}</b>: {{ h.old }} → {{ h.new }}
+    {%- elif h.kind == 'hw' -%}
+      {{ HISTORY_HW.get(h.field, h.field) }}: <span class="hist-old">{{ h.old }}</span> → <b>{{ h.new }}</b>
+    {%- elif h.kind == 'first' -%}
+      Первая инвентаризация: найдено программ — {{ h.new }}
+    {%- elif h.kind == 'pc_added' -%}
+      ПК добавлен в реестр
+    {%- elif h.kind == 'pc_renamed' -%}
+      Перенесён: {{ h.old }} → <b>{{ h.new }}</b>
+    {%- elif h.kind == 'pc_removed' -%}
+      ПК удалён из реестра
+    {%- elif h.kind == 'pc_status' -%}
+      Статус: {{ STATUSES.get(h.old, h.old) }} → <b>{{ STATUSES.get(h.new, h.new) }}</b>
+    {%- else -%}
+      {{ h.kind }} {{ h.field }} {{ h.old }} {{ h.new }}
+    {%- endif -%}
+    </span>
+    <span class="hist-src muted small">
+      {%- if h.source == 'auto' %}автовыгрузка
+      {%- elif h.ticket_id %}по <a href="{{ url_for('ticket', ticket_id=h.ticket_id) }}">заявке №{{ h.ticket_id }}</a>{% if h.who %} · {{ h.who }}{% endif %}
+      {%- else %}{{ h.who or 'вручную' }}{% endif %}</span>
+  </li>
+{%- endmacro %}
+
+{# События, сгруппированные по дням. #}
+{% macro history_list(rows, show_pc=True) -%}
+  {% for day, items in rows|groupby('day')|reverse %}
+  <div class="hist-day">
+    <h3>{{ day | ru_date }}</h3>
+    <ul class="hist-list">{% for h in items %}{{ history_event(h, show_pc) }}{% endfor %}</ul>
+  </div>
+  {% endfor %}
+{%- endmacro %}
+
 {% macro delete_button(action, label, confirm_text, extra='') -%}
   <form method="post" action="{{ action }}" class="inline" data-confirm="{{ confirm_text }}">
     {{ csrf() }}{{ extra }}

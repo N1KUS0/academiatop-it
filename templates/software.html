@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import cat_badge, lic_badge, status_badge, delete_button %}
+{% from "macros.html" import cat_badge, lic_badge, status_badge, delete_button, history_list %}
 {% block title %}{{ sw.name }}{% endblock %}
 {% block content %}
 <nav class="crumbs"><a href="{{ url_for('software_list') }}">Справочник ПО</a> / {{ sw.name }}</nav>
@@ -48,6 +48,17 @@
 {% else %}
 <div class="card empty">Эта программа пока не отмечена ни на одном ПК.</div>
 {% endfor %}
+
+
+<h2 id="history">История установок</h2>
+{% if events %}
+<div class="card">
+  {{ history_list(events, show_pc=True) }}
+  {% if more_events %}<p class="small" style="margin:8px 0 0"><a href="{{ url_for('history_page', sw=sw.id) }}">Вся история →</a></p>{% endif %}
+</div>
+{% else %}
+<div class="card empty">Установок и удалений этой программы пока не было.</div>
+{% endif %}
 
 {% if is_admin %}
 <div class="danger-zone">

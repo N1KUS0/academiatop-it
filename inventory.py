@@ -10,6 +10,7 @@ import re
 import zipfile
 from datetime import datetime
 
+import history
 from inventory_rules import CATALOG, NAME, NONE, RAW, RULES, YEAR
 
 COMPILED_RULES = [(re.compile(p, re.IGNORECASE), canon, ver, use_date) for p, canon, ver, use_date in RULES]
@@ -240,8 +241,12 @@ def load_aliases(conn):
         """SELECT a.raw_key, s.name FROM sw_aliases a LEFT JOIN software s ON s.id = a.software_id""")}
 
 
-def apply_import(conn, computers, software):
-    """Записывает выгрузку в базу. Возвращает статистику. Всё в одной транзакции."""
+def apply_import(conn, computers, software, log_history=True):
+    """Записывает выгрузку в базу. Возвращает статистику. Всё в одной транзакции.
+
+    log_history=False — повторный прогон прошлой выгрузки после сопоставления названий: программы там
+    не установлены заново, их просто начали узнавать, поэтому в историю ПК это не пишется."""
+    at = history.now_str()  # все события одной выгрузки — с одним временем
     stats = {"pcs": 0, "pcs_new": [], "pcs_skipped": [], "pcs_no_software": [], "auditoriums_new": [],
              "added": 0, "updated": 0, "removed": 0, "unchanged": 0, "software_new": [], "unknown": 0}
     if not computers:
@@ -264,34 +269,49 @@ def apply_import(conn, computers, software):
                 aud_id = conn.execute("INSERT INTO auditoriums (num) VALUES (?)", (pc["aud_num"],)).lastrowid
                 stats["auditoriums_new"].append(f"AUD-{pc['aud_num']}")
             fields = (pc["os"], pc["os_version"], pc["cpu"], pc["ram"], pc["disk"], pc["note"])
-            row = conn.execute("SELECT id FROM computers WHERE auditorium_id = ? AND num = ?",
+            hostname = f"PC-{pc['aud_num']:02d}-{pc['num']:02d}"
+            row = conn.execute("SELECT * FROM computers WHERE auditorium_id = ? AND num = ?",
                                (aud_id, pc["num"])).fetchone()
             if row:
                 pc_id = row["id"]
                 conn.execute("UPDATE computers SET os=?, os_version=?, cpu=?, ram=?, disk=?, note=? WHERE id=?",
                              fields + (pc_id,))
+                if log_history:
+                    history.log_hw_changes(conn, pc_id, hostname, history.hw_snapshot(row), history.hw_snapshot(pc),
+                                           "auto", at=at)
             else:
                 pc_id = conn.execute(
                     """INSERT INTO computers (auditorium_id, num, os, os_version, cpu, ram, disk, note)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", (aud_id, pc["num"]) + fields).lastrowid
-                stats["pcs_new"].append(f"PC-{pc['aud_num']:02d}-{pc['num']:02d}")
+                stats["pcs_new"].append(hostname)
+                if log_history:
+                    history.log(conn, pc_id, hostname, history.PC_ADDED, source="auto", at=at)
 
             # Нет ни одной строки ПО по этому ПК — сбор не удался, список программ не трогаем.
             if pc["ad_hostname"] not in sw_rows:
                 stats["pcs_no_software"].append(f"PC-{pc['aud_num']:02d}-{pc['num']:02d}")
                 continue
 
-            current = {}
+            current, names = {}, {}
             for name, entry in installs.get(pc["ad_hostname"], {}).items():
-                current[software_id(conn, name, stats)] = summarize(entry)
+                sw_id = software_id(conn, name, stats)
+                current[sw_id], names[sw_id] = summarize(entry), name
             existing = {r["software_id"]: r for r in conn.execute(
-                "SELECT * FROM installations WHERE computer_id = ?", (pc_id,))}
+                "SELECT i.*, s.name FROM installations i JOIN software s ON s.id = i.software_id "
+                "WHERE i.computer_id = ?", (pc_id,))}
+            # Первая выгрузка по ПК: в историю — одна строка «найдено N программ», а не сотни «установлена».
+            first = not any(old["source"] == "auto" for old in existing.values())
+            added_here = 0
             for sw_id, (version, date) in current.items():
                 old = existing.get(sw_id)
                 if old is None:
                     conn.execute("""INSERT INTO installations (computer_id, software_id, version, installed_at, source)
                                     VALUES (?, ?, ?, ?, 'auto')""", (pc_id, sw_id, version, date))
                     stats["added"] += 1
+                    added_here += 1
+                    if log_history and not first:
+                        history.log(conn, pc_id, hostname, history.SW_ADDED, names[sw_id], new=version,
+                                    source="auto", date=date, software_id=sw_id, at=at)
                 else:
                     if (old["version"], old["installed_at"], old["source"]) != (version, date, "auto"):
                         conn.execute("UPDATE installations SET version = ?, installed_at = ?, source = 'auto' "
@@ -299,11 +319,20 @@ def apply_import(conn, computers, software):
                     # Смена только пометки «ручная → авто» изменением не считается.
                     changed = (old["version"], old["installed_at"]) != (version, date)
                     stats["updated" if changed else "unchanged"] += 1
+                    # В историю — только смена версии (дата установки сама по себе — не событие).
+                    if log_history and old["version"] and version and old["version"] != version:
+                        history.log(conn, pc_id, hostname, history.SW_UPDATED, names[sw_id], old["version"], version,
+                                    source="auto", date=date, software_id=sw_id, at=at)
+            if log_history and first and added_here:
+                history.log(conn, pc_id, hostname, history.FIRST_INVENTORY, new=str(added_here), source="auto", at=at)
             # Программа пропала из выгрузки — удаляем, но только записи, созданные импортом.
             for sw_id, old in existing.items():
                 if sw_id not in current and old["source"] == "auto":
                     conn.execute("DELETE FROM installations WHERE id = ?", (old["id"],))
                     stats["removed"] += 1
+                    if log_history:
+                        history.log(conn, pc_id, hostname, history.SW_REMOVED, old["name"], old=old["version"],
+                                    source="auto", software_id=sw_id, at=at)
 
         conn.execute("DELETE FROM import_unknown")
         conn.executemany(
@@ -322,7 +351,7 @@ def run_import(conn, data, origin, filename=""):
     """Полный цикл: чтение архива, запись, журнал. Возвращает (ok, сообщение, статистика)."""
     try:
         computers, software = read_archive(data)
-        stats = apply_import(conn, computers, software)
+        stats = apply_import(conn, computers, software, log_history=origin != "rerun")
         ok, message = True, format_stats(stats)
     except InventoryError as e:
         ok, message, stats = False, str(e), {}

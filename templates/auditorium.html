@@ -8,6 +8,7 @@
   <div class="actions">
     <a class="btn" href="{{ url_for('ticket_new', kind='problem', auditorium=code) }}">Сообщить о проблеме</a>
     <a class="btn" href="{{ url_for('ticket_new', kind='install', auditorium=code) }}">Запросить установку ПО</a>
+    <a class="btn" href="{{ url_for('history_page', aud=code) }}">История</a>
     {% if is_admin %}
     {% if computers %}
     <form method="post" action="{{ url_for('auditorium_wake', code=code) }}" class="inline"

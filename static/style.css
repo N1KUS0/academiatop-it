@@ -436,3 +436,20 @@ form.drop-target { outline: 2px dashed var(--accent); outline-offset: 4px; }
   .netmap-aud-side { flex: none; flex-direction: row; align-items: center; gap: 12px; }
   .netmap-aud-name { flex-direction: row; gap: 8px; align-items: baseline; }
 }
+
+/* ---------- история изменений на ПК ---------- */
+.hist-day + .hist-day { margin-top: 14px; }
+.hist-day h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .3px; }
+.hist-list { list-style: none; margin: 0; padding: 0; }
+.hist { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 6px 0 6px 12px; border-left: 3px solid var(--line); }
+.hist + .hist { border-top: 1px solid #f0f1f4; }
+.hist-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.hist-pc { font-size: 13px; min-width: 76px; }
+.hist-text { flex: 1 1 260px; overflow-wrap: anywhere; }
+.hist-src { margin-left: auto; }
+.hist-old { color: var(--muted); text-decoration: line-through; }
+.hist-sw_added { border-left-color: #2f9e57; }
+.hist-sw_removed { border-left-color: #c2410c; }
+.hist-sw_updated { border-left-color: #3b82f6; }
+.hist-hw { border-left-color: #9333ea; }
+.hist-first, .hist-pc_added, .hist-pc_renamed, .hist-pc_removed, .hist-pc_status { border-left-color: #94a3b8; }

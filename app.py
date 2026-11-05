@@ -20,6 +20,7 @@ from flask.sessions import SecureCookieSessionInterface
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import db
+import history
 import inventory
 import netmap
 import shutdown
@@ -193,7 +194,7 @@ def static_url(filename):
 
 
 # Глобальные переменные нужны и в импортируемых макросах, поэтому не через context_processor.
-app.jinja_env.globals.update(csrf_token=csrf_token, static_url=static_url, SITE_NAME=SITE_NAME, SITE_TAGLINE=SITE_TAGLINE,
+app.jinja_env.globals.update(csrf_token=csrf_token, static_url=static_url, HISTORY_HW=history.HW_FIELDS, SITE_NAME=SITE_NAME, SITE_TAGLINE=SITE_TAGLINE,
                              SITE_AUTHOR=SITE_AUTHOR, CATEGORIES=CATEGORIES,
                              LICENSE_TYPES=LICENSE_TYPES, STATUSES=STATUSES,
                              TICKET_KINDS=TICKET_KINDS, TICKET_STATUSES=TICKET_STATUSES)
@@ -1065,6 +1066,69 @@ def auditorium_delete(code):
 
 # --------------------------------------------------------------------------- computers
 
+# --------------------------------------------------------------------------- история изменений
+
+HISTORY_PAGE = 200
+
+HISTORY_SQL = """
+SELECT h.*, c.num AS pc_num, a.num AS aud_num
+FROM pc_history h
+LEFT JOIN computers c ON c.id = h.computer_id
+LEFT JOIN auditoriums a ON a.id = c.auditorium_id
+"""
+
+
+def history_rows(where="", params=(), limit=HISTORY_PAGE, offset=0):
+    """События истории, новые первыми. pc_link — текущее имя ПК, если он есть в реестре."""
+    rows = get_db().execute(HISTORY_SQL + where + " ORDER BY h.id DESC LIMIT ? OFFSET ?",
+                            (*params, limit, offset)).fetchall()
+    out = []
+    for r in rows:
+        h = dict(r)
+        h["pc_link"] = pc_hostname(h["aud_num"], h["pc_num"]) if h["pc_num"] else None
+        h["day"] = h["at"][:10]
+        h["ticket_id"] = int(h["source"][7:]) if h["source"].startswith("ticket:") and h["source"][7:].isdigit() \
+            else None
+        out.append(h)
+    return out
+
+
+@app.route("/history")
+def history_page():
+    """История изменений на ПК: что установлено и удалено, смена версий и «железа»."""
+    aud, kind, q = request.args.get("aud", ""), request.args.get("kind", ""), request.args.get("q", "").strip()
+    pc, sw = request.args.get("pc", ""), request.args.get("sw", "")
+    page = max(1, int(request.args.get("page", "1")) if request.args.get("page", "1").isdigit() else 1)
+    where, params, title = [], [], None
+    if parse_hostname(pc):
+        row = find_computer(pc)
+        # ПК мог быть переименован: события и по текущему id, и по имени на момент события.
+        where.append("(h.computer_id = ? OR h.hostname = ?)")
+        params += [row["id"] if row else -1, pc.upper()]
+        title = pc.upper()
+    elif sw.isdigit():
+        where.append("h.software_id = ?")
+        params.append(int(sw))
+        sw_row = get_db().execute("SELECT name FROM software WHERE id = ?", (int(sw),)).fetchone()
+        title = sw_row["name"] if sw_row else None
+    if parse_aud_code(aud):
+        num = parse_aud_code(aud)
+        where.append("(a.num = ? OR (h.computer_id IS NULL AND h.hostname LIKE ?))")
+        params += [num, f"PC-{num:02d}-%"]
+    if kind in history.KIND_GROUPS:
+        kinds = history.KIND_GROUPS[kind]
+        where.append("h.kind IN (%s)" % ",".join("?" * len(kinds)))
+        params += kinds
+    if q:
+        where.append("(h.field LIKE ? OR h.hostname LIKE ? OR h.old LIKE ? OR h.new LIKE ?)")
+        params += [f"%{q}%"] * 4
+    rows = history_rows(" WHERE " + " AND ".join(where) if where else "", params,
+                        HISTORY_PAGE + 1, (page - 1) * HISTORY_PAGE)
+    return render_template("history.html", rows=rows[:HISTORY_PAGE], has_more=len(rows) > HISTORY_PAGE, page=page,
+                           aud=aud, kind=kind, q=q, pc=pc.upper() if title and parse_hostname(pc) else "",
+                           sw=sw if title and sw.isdigit() else "", title=title, auditoriums=list_auditoriums())
+
+
 @app.route("/computers")
 def computers():
     where, params = [], []
@@ -1099,19 +1163,30 @@ def save_computer(existing=None):
         return None
     fields = (aud_id, num, form_str("inv_number"), form_str("os"), form_str("os_version"),
               form_str("cpu"), form_str("ram"), form_str("disk"), status, form_str("note", 1000))
+    hostname, who = pc_hostname(aud_row["num"], num), current_user()["name"]
     conn = get_db()
     try:
         if existing:
             conn.execute("""UPDATE computers SET auditorium_id=?, num=?, inv_number=?, os=?, os_version=?,
                             cpu=?, ram=?, disk=?, status=?, note=? WHERE id=?""", fields + (existing["id"],))
+            pc_id = existing["id"]
+            if hostname != existing["hostname"]:
+                history.log(conn, pc_id, hostname, history.PC_RENAMED, old=existing["hostname"], new=hostname, who=who)
+            if status != existing["status"]:
+                history.log(conn, pc_id, hostname, history.PC_STATUS, old=existing["status"], new=status, who=who)
+            after = dict(zip(("os", "os_version", "cpu", "ram", "disk"), fields[3:8]), note=fields[9])
+            history.log_hw_changes(conn, pc_id, hostname, history.hw_snapshot(existing), history.hw_snapshot(after),
+                                   who=who)
         else:
-            conn.execute("""INSERT INTO computers (auditorium_id, num, inv_number, os, os_version,
-                            cpu, ram, disk, status, note) VALUES (?,?,?,?,?,?,?,?,?,?)""", fields)
+            pc_id = conn.execute("""INSERT INTO computers (auditorium_id, num, inv_number, os, os_version,
+                            cpu, ram, disk, status, note) VALUES (?,?,?,?,?,?,?,?,?,?)""", fields).lastrowid
+            history.log(conn, pc_id, hostname, history.PC_ADDED, who=who)
         conn.commit()
     except sqlite3.IntegrityError:
-        flash(f"{pc_hostname(aud_row['num'], num)} уже существует.", "danger")
+        conn.rollback()
+        flash(f"{hostname} уже существует.", "danger")
         return None
-    return pc_hostname(aud_row["num"], num)
+    return hostname
 
 
 @app.route("/computers/new", methods=["GET", "POST"])
@@ -1153,8 +1228,10 @@ def computer(hostname):
         "SELECT * FROM tickets WHERE (computer_id = ? OR id IN "
         "(SELECT ticket_id FROM ticket_computers WHERE computer_id = ?)) AND status IN (%s) ORDER BY id DESC"
         % ",".join("?" * len(TICKET_OPEN)), (pc["id"], pc["id"], *TICKET_OPEN)).fetchall()
+    events = history_rows(" WHERE (h.computer_id = ? OR h.hostname = ?)", (pc["id"], pc["hostname"]), limit=31)
     return render_template("computer.html", pc=pc, installs=installs, sw_names=software_names(),
-                           open_tickets=open_tickets, pc_macs=netmap.macs_from_note(pc["note"]))
+                           open_tickets=open_tickets, pc_macs=netmap.macs_from_note(pc["note"]),
+                           events=events[:30], more_events=len(events) > 30)
 
 
 @app.route("/computers/<hostname>/edit", methods=["GET", "POST"])
@@ -1174,6 +1251,7 @@ def computer_edit(hostname):
 @admin_required
 def computer_delete(hostname):
     pc = get_computer_or_404(hostname)
+    history.log(get_db(), pc["id"], pc["hostname"], history.PC_REMOVED, who=current_user()["name"])
     get_db().execute("DELETE FROM computers WHERE id = ?", (pc["id"],))
     get_db().commit()
     flash(f"{pc['hostname']} удалён вместе со списком его ПО.", "success")
@@ -1193,12 +1271,21 @@ def computer_install(hostname):
     else:
         sw_id, created = find_or_create_software(name)
         conn = get_db()
+        version = form_str("version", 100)
+        old = conn.execute("SELECT version FROM installations WHERE computer_id = ? AND software_id = ?",
+                           (pc["id"], sw_id)).fetchone()
         conn.execute(
             """INSERT INTO installations (computer_id, software_id, version, installed_at, note)
                VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(computer_id, software_id) DO UPDATE SET
                  version = excluded.version, installed_at = excluded.installed_at, note = excluded.note""",
-            (pc["id"], sw_id, form_str("version", 100), installed_at, form_str("note", 500)))
+            (pc["id"], sw_id, version, installed_at, form_str("note", 500)))
+        if old is None:
+            history.log(conn, pc["id"], pc["hostname"], history.SW_ADDED, name, new=version, date=installed_at,
+                        software_id=sw_id, who=current_user()["name"])
+        elif old["version"] != version:
+            history.log(conn, pc["id"], pc["hostname"], history.SW_UPDATED, name, old["version"], version,
+                        date=installed_at, software_id=sw_id, who=current_user()["name"])
         conn.commit()
         flash(f"«{name}» записано на {pc['hostname']}.", "success")
         if created:
@@ -1222,8 +1309,12 @@ def installation_edit(inst_id):
         if installed_at is None:
             flash("Неверная дата.", "danger")
         else:
+            version = form_str("version", 100)
             conn.execute("UPDATE installations SET version = ?, installed_at = ?, note = ? WHERE id = ?",
-                         (form_str("version", 100), installed_at, form_str("note", 500), inst_id))
+                         (version, installed_at, form_str("note", 500), inst_id))
+            if version != inst["version"]:
+                history.log(conn, inst["computer_id"], hostname, history.SW_UPDATED, inst["name"], inst["version"],
+                            version, date=installed_at, software_id=inst["software_id"], who=current_user()["name"])
             conn.commit()
             flash("Сохранено.", "success")
             return redirect(request.form.get("back") or url_for("computer", hostname=hostname))
@@ -1237,6 +1328,13 @@ def installation_edit(inst_id):
 @admin_required
 def installation_delete(inst_id):
     conn = get_db()
+    inst = conn.execute(
+        """SELECT i.*, s.name, c.num AS pc_num, a.num AS aud_num FROM installations i
+           JOIN software s ON s.id = i.software_id JOIN computers c ON c.id = i.computer_id
+           JOIN auditoriums a ON a.id = c.auditorium_id WHERE i.id = ?""", (inst_id,)).fetchone()
+    if inst:
+        history.log(conn, inst["computer_id"], pc_hostname(inst["aud_num"], inst["pc_num"]), history.SW_REMOVED,
+                    inst["name"], old=inst["version"], software_id=inst["software_id"], who=current_user()["name"])
     conn.execute("DELETE FROM installations WHERE id = ?", (inst_id,))
     conn.commit()
     flash("Запись об установке удалена.", "success")
@@ -1325,8 +1423,10 @@ def software(sw_id):
     by_aud = {}
     for r in installs:
         by_aud.setdefault(aud_code(r["aud_num"]), []).append(r)
+    events = history_rows(" WHERE h.software_id = ?", (sw_id,), limit=31)
     return render_template("software.html", sw=sw, installs=installs, by_aud=by_aud,
-                           versions=sorted(versions.items(), key=lambda kv: -kv[1]))
+                           versions=sorted(versions.items(), key=lambda kv: -kv[1]),
+                           events=events[:30], more_events=len(events) > 30)
 
 
 @app.route("/software/<int:sw_id>/edit", methods=["GET", "POST"])
@@ -1345,8 +1445,14 @@ def software_edit(sw_id):
 @admin_required
 def software_delete(sw_id):
     sw = get_software_or_404(sw_id)
-    get_db().execute("DELETE FROM software WHERE id = ?", (sw_id,))
-    get_db().commit()
+    conn = get_db()
+    for r in conn.execute("""SELECT i.computer_id, i.version, c.num AS pc_num, a.num AS aud_num
+                             FROM installations i JOIN computers c ON c.id = i.computer_id
+                             JOIN auditoriums a ON a.id = c.auditorium_id WHERE i.software_id = ?""", (sw_id,)):
+        history.log(conn, r["computer_id"], pc_hostname(r["aud_num"], r["pc_num"]), history.SW_REMOVED, sw["name"],
+                    old=r["version"], who=current_user()["name"])
+    conn.execute("DELETE FROM software WHERE id = ?", (sw_id,))
+    conn.commit()
     flash(f"«{sw['name']}» удалена из справочника вместе со всеми установками.", "success")
     return redirect(url_for("software_list"))
 
@@ -1366,8 +1472,9 @@ def software_bulk(sw_id):
             return redirect(request.url)
         version = form_str("version", 100)
         selected = {int(x) for x in request.form.getlist("pc") if x.isdigit()}
-        valid = {r["id"] for r in conn.execute("SELECT id FROM computers")}
-        selected &= valid
+        hostnames = {c["id"]: c["hostname"] for c in list_computers()}
+        selected &= set(hostnames)
+        who = current_user()["name"]
         added = updated = removed = 0
         for pc_id in selected:
             if pc_id in existing:
@@ -1375,15 +1482,22 @@ def software_bulk(sw_id):
                     conn.execute("UPDATE installations SET version = ?, installed_at = ? WHERE id = ?",
                                  (version, installed_at, existing[pc_id]["id"]))
                     updated += 1
+                    if version != existing[pc_id]["version"]:
+                        history.log(conn, pc_id, hostnames[pc_id], history.SW_UPDATED, sw["name"],
+                                    existing[pc_id]["version"], version, date=installed_at, software_id=sw_id, who=who)
             else:
                 conn.execute("""INSERT INTO installations (computer_id, software_id, version, installed_at)
                                 VALUES (?, ?, ?, ?)""", (pc_id, sw_id, version, installed_at))
                 added += 1
+                history.log(conn, pc_id, hostnames[pc_id], history.SW_ADDED, sw["name"], new=version,
+                            date=installed_at, software_id=sw_id, who=who)
         if request.form.get("remove_unchecked"):
             for pc_id, inst in existing.items():
                 if pc_id not in selected:
                     conn.execute("DELETE FROM installations WHERE id = ?", (inst["id"],))
                     removed += 1
+                    history.log(conn, pc_id, hostnames.get(pc_id, "?"), history.SW_REMOVED, sw["name"],
+                                old=inst["version"], software_id=sw_id, who=who)
         conn.commit()
         flash(f"Готово: добавлено {added}, обновлено {updated}, удалено {removed}.", "success")
         return redirect(url_for("software", sw_id=sw_id))
@@ -1514,7 +1628,7 @@ def export(kind, fmt):
     abort(404)
 
 
-BACKUP_TABLES = ["auditoriums", "computers", "software", "installations", "sw_aliases",
+BACKUP_TABLES = ["auditoriums", "computers", "software", "installations", "sw_aliases", "pc_history",
                  "tickets", "ticket_computers", "ticket_messages", "ticket_watchers"]
 
 
@@ -2298,8 +2412,14 @@ def ticket_install(ticket_id):
     conn = get_db()
     sw_id, created = find_or_create_software(t["software_name"])
     version, today = form_str("version", 50), date.today().isoformat()
+    have = {r[0] for r in conn.execute("SELECT computer_id FROM installations WHERE software_id = ?", (sw_id,))}
+    hostnames = {c["id"]: c["hostname"] for c in list_computers()}
     conn.executemany("INSERT OR IGNORE INTO installations (computer_id, software_id, version, installed_at) "
                      "VALUES (?, ?, ?, ?)", [(pc_id, sw_id, version, today) for pc_id in targets])
+    for pc_id in targets:
+        if pc_id not in have:
+            history.log(conn, pc_id, hostnames.get(pc_id, "?"), history.SW_ADDED, t["software_name"], new=version,
+                        date=today, software_id=sw_id, source=f"ticket:{ticket_id}", who=current_user()["name"])
     where = t["pc_label"] if t["computer_id"] or 1 < len(t["pcs"]) <= 3 else f"{t['pc_label']} ({len(targets)} ПК)"
     stamp = now_str()
     conn.execute("INSERT INTO ticket_messages (ticket_id, author_name, is_admin, body, status, created_at) "

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "macros.html" import history_list %}
+{% block title %}История изменений{% if title %} — {{ title }}{% endif %}{% endblock %}
+{% block content %}
+<nav class="crumbs">
+  {% if pc %}<a href="{{ url_for('computer', hostname=pc) }}">{{ pc }}</a> / история
+  {% elif sw %}<a href="{{ url_for('software', sw_id=sw) }}">{{ title }}</a> / история
+  {% else %}<a href="{{ url_for('computers') }}">Компьютеры</a> / история{% endif %}
+</nav>
+<h1>История изменений{% if title %} <small class="muted">· {{ title }}</small>{% endif %}</h1>
+<p class="muted small">Что установлено и удалено на ПК, смена версий программ и «железа» (IP и MAC не учитываются).
+  Записи появляются при автовыгрузке и при правках вручную.</p>
+
+<form class="card filters" method="get">
+  {% if pc %}<input type="hidden" name="pc" value="{{ pc }}">{% endif %}
+  {% if sw %}<input type="hidden" name="sw" value="{{ sw }}">{% endif %}
+  {% if not pc %}
+  <label>Аудитория
+    <select name="aud" onchange="this.form.submit()">
+      <option value="">Все</option>
+      {% for a in auditoriums %}<option value="AUD-{{ a.num }}" {{ 'selected' if aud == 'AUD-' ~ a.num }}>AUD-{{ a.num }}</option>{% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  <label>Что
+    <select name="kind" onchange="this.form.submit()">
+      <option value="">Всё</option>
+      <option value="sw" {{ 'selected' if kind == 'sw' }}>Установка и удаление программ</option>
+      <option value="updates" {{ 'selected' if kind == 'updates' }}>Обновления версий</option>
+      <option value="hw" {{ 'selected' if kind == 'hw' }}>«Железо» и ОС</option>
+      <option value="pc" {{ 'selected' if kind == 'pc' }}>Компьютеры: добавлены, перенесены, статус</option>
+    </select>
+  </label>
+  <label class="grow">Поиск
+    <input type="search" name="q" value="{{ q }}" placeholder="программа, ПК, версия, процессор…">
+  </label>
+  <button class="btn">Найти</button>
+</form>
+
+{% if rows %}
+<div class="card">{{ history_list(rows, show_pc=not pc) }}</div>
+<p class="small">
+  {% if page > 1 %}<a href="{{ url_for('history_page', pc=pc or None, sw=sw or None, aud=aud or None, kind=kind or None, q=q or None, page=page - 1) }}">← Новее</a>{% endif %}
+  {% if has_more %}{% if page > 1 %} · {% endif %}<a href="{{ url_for('history_page', pc=pc or None, sw=sw or None, aud=aud or None, kind=kind or None, q=q or None, page=page + 1) }}">Старее →</a>{% endif %}
+</p>
+{% else %}
+<div class="card empty">Ничего не найдено. История начинает собираться с этого обновления — после ближайшей автовыгрузки здесь появятся изменения.</div>
+{% endif %}
+{% endblock %}

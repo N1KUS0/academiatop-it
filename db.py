@@ -47,6 +47,24 @@ CREATE TABLE IF NOT EXISTS installations (
     UNIQUE (computer_id, software_id)
 );
 
+-- История изменений на ПК (см. history.py): установка и удаление программ, смена версий, «железа», имени ПК.
+CREATE TABLE IF NOT EXISTS pc_history (
+    id          INTEGER PRIMARY KEY,
+    computer_id INTEGER REFERENCES computers(id) ON DELETE SET NULL,
+    hostname    TEXT NOT NULL,                  -- имя ПК на момент события (если ПК удалят или переименуют)
+    at          TEXT NOT NULL,                  -- когда записано: ГГГГ-ММ-ДД ЧЧ:ММ
+    kind        TEXT NOT NULL,                  -- вид события, см. history.py
+    field       TEXT NOT NULL DEFAULT '',       -- программа или поле «железа»
+    old         TEXT NOT NULL DEFAULT '',
+    new         TEXT NOT NULL DEFAULT '',
+    date        TEXT NOT NULL DEFAULT '',       -- дата установки программы по данным Windows, если известна
+    software_id INTEGER REFERENCES software(id) ON DELETE SET NULL,
+    source      TEXT NOT NULL DEFAULT 'manual', -- auto — автовыгрузка, manual — вручную, ticket:N — по заявке
+    who         TEXT NOT NULL DEFAULT ''        -- кто внёс вручную
+);
+CREATE INDEX IF NOT EXISTS pc_history_pc ON pc_history (computer_id, id);
+CREATE INDEX IF NOT EXISTS pc_history_at ON pc_history (at);
+
 -- Журнал импортов автовыгрузки
 CREATE TABLE IF NOT EXISTS imports (
     id         INTEGER PRIMARY KEY,
