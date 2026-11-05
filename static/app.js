@@ -306,7 +306,7 @@ document.querySelectorAll('input[type="password"]').forEach(function (input) {
   var summary = document.getElementById("netmap-summary");
   var button = document.getElementById("netmap-refresh");
   var tiles = map.querySelectorAll(".net-pc[data-host]");
-  var TEXT = { up: "в сети", down: "не отвечает", noip: "IP неизвестен — впишите «IP: …» в примечание", off: "списан",
+  var TEXT = { up: "в сети", down: "не отвечает", noip: "адрес неизвестен: нет в DNS и нет «IP: …» в примечании", off: "списан",
               wait: "не проверен" };
   var busy = false, timer = null;
 
@@ -315,7 +315,8 @@ document.querySelectorAll('input[type="password"]').forEach(function (input) {
     tiles.forEach(function (el) {
       var info = data.pcs[el.dataset.host] || { state: "noip" };
       el.className = el.className.replace(/\bstate-\w+/, "state-" + info.state);
-      el.title = el.dataset.label + " — " + TEXT[info.state] + (info.ms != null ? " (" + info.ms + " мс)" : "");
+      el.title = el.dataset.host + (info.ip ? " · " + info.ip : el.dataset.label.slice(el.dataset.host.length)) +
+        " — " + TEXT[info.state] + (info.ms != null ? " (" + info.ms + " мс)" : "");
       var a = perAud[el.dataset.aud] || (perAud[el.dataset.aud] = { up: 0, total: 0 });
       if (info.state !== "off" && info.state !== "wait") { total++; a.total++; }
       if (info.state === "up") { up++; a.up++; }

@@ -287,26 +287,25 @@ def get_setting_safe(key):
 @app.cli.command("netmap-check")
 def netmap_check_command():
     """Проверить, может ли сервер пинговать ПК для блока «ПК в сети» на главной."""
-    targets = {}
-    for c in list_computers():
-        ip = netmap.ip_from_note(c["note"])
-        if ip and c["status"] != "decommissioned":
-            targets[c["hostname"]] = ip
-    click.echo(f"ПК с IP: {len(targets)}")
-    if not targets:
-        return
+    computers = [c for c in list_computers() if c["status"] != "decommissioned"]
     steps = []
-    try:
-        alive = netmap.ping_many(targets.values(), explain=steps)
+    try:  # отдельный прогон ping — чтобы показать, каким способом сервер пингует
+        netmap.ping_many(["127.0.0.1"], explain=steps)
     except netmap.PingUnavailable as e:
-        alive = None
         steps.append(str(e))
     for s in steps:
         click.echo(f"  {s}")
-    if alive is not None:
-        click.echo(f"В сети: {sum(ip in alive for ip in targets.values())} из {len(targets)}")
-        for host, ip in sorted(targets.items()):
-            click.echo(f"  {host:10} {ip:15} {str(alive[ip]) + ' мс' if ip in alive else 'не отвечает'}")
+    up, _at, error, details = netmap.status(computers)
+    if error:
+        click.echo(error)
+        return
+    click.echo(f"В сети: {len(up)} из {len(computers)} (адрес известен у {len(details)})")
+    for c in computers:
+        host = c["hostname"]
+        state = "В СЕТИ" if host in up else "не в сети"
+        found = details.get(host)
+        click.echo(f"  {host:10} {state:9}  " + ("; ".join(f"{ip} ({src}): {verdict}" for ip, src, verdict in found)
+                                                if found else "адрес неизвестен: нет в DNS и нет «IP: …» в примечании"))
 
 
 @app.cli.command("set-password")
@@ -880,23 +879,18 @@ def auditorium_wake(code):
 def netmap_status():
     """Какие ПК отвечают на ping: {hostname: "up" | "down" | "noip" | "off"}. Списанные не пингуются."""
     computers = list_computers()
-    targets = {}
-    for c in computers:
-        ip = netmap.ip_from_note(c["note"])
-        if ip and c["status"] != "decommissioned":
-            targets[c["hostname"]] = ip
-    alive, checked_at, error = netmap.check(targets.values())
+    up, checked_at, error, details = netmap.status(computers)
     pcs = {}
     for c in computers:
         host = c["hostname"]
         if c["status"] == "decommissioned":
             pcs[host] = {"state": "off"}
-        elif host not in targets:
+        elif host not in details:
             pcs[host] = {"state": "noip"}
         elif error:
             pcs[host] = {"state": "wait"}  # неизвестно: сервер не смог пинговать
-        elif targets[host] in alive:
-            pcs[host] = {"state": "up", "ms": alive[targets[host]]}
+        elif host in up:
+            pcs[host] = {"state": "up", **up[host]}
         else:
             pcs[host] = {"state": "down"}
     resp = jsonify(checked_at=datetime.fromtimestamp(checked_at).strftime("%H:%M:%S"), pcs=pcs, error=error)
