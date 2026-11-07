@@ -158,6 +158,61 @@ document.querySelectorAll("[data-filter-table]").forEach(function (input) {
   refresh();
 })();
 
+// Просмотр картинок во всплывающем окне на этой же странице: ← → — соседние, Esc / клик мимо — закрыть.
+// items: [{src: адрес картинки, href: ссылка «Открыть оригинал» (необязательно)}].
+var openLightbox = (function () {
+  var dlg, img, counter, original, items = [], index = 0;
+  function build() {
+    dlg = document.createElement("dialog");
+    dlg.className = "lightbox";
+    dlg.innerHTML =
+      '<button type="button" class="lb-close" title="Закрыть (Esc)">×</button>' +
+      '<button type="button" class="lb-nav lb-prev" title="Предыдущее (←)">‹</button>' +
+      '<img alt="">' +
+      '<button type="button" class="lb-nav lb-next" title="Следующее (→)">›</button>' +
+      '<div class="lb-bar"><span class="lb-counter"></span><a class="lb-original" target="_blank" rel="noopener">Открыть оригинал</a></div>';
+    document.body.appendChild(dlg);
+    img = dlg.querySelector("img");
+    counter = dlg.querySelector(".lb-counter");
+    original = dlg.querySelector(".lb-original");
+    dlg.querySelector(".lb-close").addEventListener("click", function () { dlg.close(); });
+    dlg.querySelector(".lb-prev").addEventListener("click", function () { show(index - 1); });
+    dlg.querySelector(".lb-next").addEventListener("click", function () { show(index + 1); });
+    // Клик по тёмному фону (мимо картинки и кнопок) закрывает.
+    dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+    dlg.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowLeft") { e.preventDefault(); show(index - 1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); show(index + 1); }
+    });
+    dlg.addEventListener("close", function () { img.removeAttribute("src"); });
+  }
+  function show(i) {
+    if (!items.length) return;
+    index = (i + items.length) % items.length;
+    img.src = items[index].src;
+    counter.textContent = items.length > 1 ? (index + 1) + " из " + items.length : "";
+    original.hidden = !items[index].href;
+    if (items[index].href) original.href = items[index].href;
+    dlg.classList.toggle("lb-single", items.length < 2);
+  }
+  return function (list, start) {
+    if (!dlg) build();
+    items = list;
+    show(start || 0);
+    if (!dlg.open) dlg.showModal();
+  };
+})();
+
+// Фото в переписке заявки — во всплывающем окне, по всем фото заявки подряд.
+// Ctrl/Shift+клик — как раньше, в новой вкладке.
+document.addEventListener("click", function (e) {
+  var link = e.target.closest && e.target.closest(".msg-photos a");
+  if (!link || e.ctrlKey || e.metaKey || e.shiftKey || !window.HTMLDialogElement) return;
+  e.preventDefault();
+  var links = Array.prototype.slice.call(document.querySelectorAll(".msg-photos a"));
+  openLightbox(links.map(function (a) { return { src: a.href, href: a.href }; }), links.indexOf(link));
+});
+
 // Фото к заявке и ответу: выбрать файлом, вставить из буфера (Ctrl+V) или перетащить в форму.
 // Выбранные фото видны миниатюрами, лишнее можно убрать. Слишком много или слишком большие — сразу
 // предупредить (сервер всё равно проверит, но большой запрос nginx отклонит целиком, без понятного сообщения).
@@ -170,9 +225,13 @@ document.querySelectorAll('input[type=file][name="photos"]').forEach(function (i
   var canSet = true;  // можно ли подменять список файлов поля (во всех современных браузерах)
   try { new DataTransfer(); } catch (e) { canSet = false; }
 
+  // Миниатюры — прямо под полем текста (туда вставляют Ctrl+V), а если его нет — под выбором файлов.
   var preview = document.createElement("div");
   preview.className = "photo-preview";
-  (label || input).insertAdjacentElement("afterend", preview);
+  var textarea = form && form.querySelector("textarea");
+  var anchor = textarea ? (textarea.closest("label") || textarea) : (label || input);
+  anchor.insertAdjacentElement("afterend", preview);
+  var urls = [];
 
   function check(list) {
     var total = list.reduce(function (s, f) { return s + f.size; }, 0);
@@ -199,13 +258,25 @@ document.querySelectorAll('input[type=file][name="photos"]').forEach(function (i
   }
   function render() {
     preview.textContent = "";
+    urls.forEach(function (u) { URL.revokeObjectURL(u); });
+    urls = files.map(function (f) { return URL.createObjectURL(f); });
+    if (files.length) {
+      var head = document.createElement("div");
+      head.className = "photo-preview-head small muted";
+      head.textContent = "Приложено фото: " + files.length + " из " + max + " — нажмите, чтобы посмотреть";
+      preview.appendChild(head);
+    }
     files.forEach(function (f, i) {
       var item = document.createElement("span");
       item.className = "photo-thumb";
       var img = document.createElement("img");
-      img.src = URL.createObjectURL(f);
+      img.src = urls[i];
       img.alt = f.name;
-      img.onload = function () { URL.revokeObjectURL(img.src); };
+      img.title = f.name;
+      img.addEventListener("click", function () {
+        if (!window.HTMLDialogElement) return;
+        openLightbox(urls.map(function (u) { return { src: u }; }), i);
+      });
       var del = document.createElement("button");
       del.type = "button";
       del.textContent = "×";
