@@ -7,7 +7,11 @@
   <a href="{{ url_for('auditorium', code=pc.aud_code) }}">{{ pc.aud_code }}</a> / {{ pc.hostname }}
 </nav>
 <div class="page-head">
-  <h1 class="mono">{{ pc.hostname }} {{ status_badge(pc.status) }}</h1>
+  <h1 class="mono">{{ pc.hostname }} {{ status_badge(pc.status) }}
+    {%- if pc.status != 'decommissioned' %}
+    <span class="badge online-badge online-wait" data-online-url="{{ url_for('computer_online', hostname=pc.hostname) }}"
+          title="Отвечает ли ПК на ping">сеть: проверяю…</span>
+    {%- endif %}</h1>
   <div class="actions">
     <a class="btn" href="{{ url_for('ticket_new', kind='problem', computer=pc.hostname) }}">Сообщить о проблеме</a>
     <a class="btn" href="{{ url_for('ticket_new', kind='install', computer=pc.hostname) }}">Запросить установку ПО</a>
@@ -43,6 +47,9 @@
 {% endif %}
 
 <dl class="card specs">
+  {% if is_admin and is_teacher_pc and pc.status != 'decommissioned' %}
+  <div class="wide pc-user" id="pc-user" hidden><dt>Сейчас за ПК</dt><dd></dd></div>
+  {% endif %}
   <div><dt>Аудитория</dt><dd><a href="{{ url_for('auditorium', code=pc.aud_code) }}">{{ pc.aud_code }}</a></dd></div>
   <div><dt>Инв. номер</dt><dd>{{ pc.inv_number or '—' }}</dd></div>
   <div><dt>ОС</dt><dd>{{ pc.os or '—' }} {{ pc.os_version }}</dd></div>

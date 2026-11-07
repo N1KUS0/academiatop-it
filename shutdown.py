@@ -7,6 +7,7 @@
 instance/shutdown.auth с правами 600. Задаётся командой `flask --app app set-shutdown-account`.
 """
 import os
+import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
@@ -132,3 +133,46 @@ def shutdown_many(ips, instance_dir, delay=DELAY, message=MESSAGE):
     with ThreadPoolExecutor(max_workers=min(16, len(ips))) as pool:
         results = pool.map(lambda ip: shutdown(ip, instance_dir, delay, message), ips)
     return dict(zip(ips, results))
+
+
+# --------------------------------------------------------------------------- кто сейчас вошёл в Windows
+
+USERS_TIMEOUT = 10
+# Служебные «пользователи», которых Windows тоже показывает: окна, шрифты, системные службы.
+_SERVICE_DOMAINS = {"WINDOW MANAGER", "FONT DRIVER HOST", "NT AUTHORITY", "NT SERVICE"}
+_SERVICE_NAME_RE = re.compile(r"^(DWM|UMFD)-\d+$", re.IGNORECASE)
+_USER_LINE_RE = re.compile(r"^\s*\d+:\s*(.+?)\s*$")
+
+
+def parse_users(output):
+    """Вывод `rpcclient … wkssvc_enumerateusers 1` -> логины вошедших (без компьютера «ИМЯ$» и служебных)."""
+    users = []
+    for line in output.splitlines():
+        m = _USER_LINE_RE.match(line)
+        if not m:
+            continue
+        domain, _, name = m.group(1).rpartition("\\")
+        if not name or name.endswith("$") or domain.upper() in _SERVICE_DOMAINS or _SERVICE_NAME_RE.match(name):
+            continue
+        if name.lower() not in (u.lower() for u in users):
+            users.append(name)
+    return users
+
+
+def logged_on_users(ip, instance_dir):
+    """Кто сейчас вошёл в Windows на ПК (запрос NetWkstaUserEnum, как у `net rpc shutdown` — по SMB от имени
+    учётной записи для выключения). -> (логины, текст ошибки или "", вывод rpcclient для проверки)."""
+    if not load_account(instance_dir):
+        return [], "не задана учётная запись (та же, что для выключения ПК, см. «Данные»)", ""
+    cmd = ["rpcclient", "-A", auth_path(instance_dir), "-s", _smb_conf(instance_dir),
+           "-c", "wkssvc_enumerateusers 1", ip]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=USERS_TIMEOUT)
+    except FileNotFoundError:
+        return [], "на сервере нет программы rpcclient: sudo apt install smbclient", ""
+    except subprocess.TimeoutExpired:
+        return [], f"ПК не ответил за {USERS_TIMEOUT} с", ""
+    out = (r.stdout + r.stderr).decode("utf-8", errors="replace")
+    if r.returncode != 0:
+        return [], explain(out), out
+    return parse_users(r.stdout.decode("utf-8", errors="replace")), "", out

@@ -375,3 +375,52 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
     a.addEventListener("click", function () { toggle.checked = false; });
   });
 })();
+
+// Страница ПК: «В сети / Не в сети» и (у ПК преподавателя, для администратора) кто сейчас вошёл.
+(function () {
+  var badge = document.querySelector("[data-online-url]");
+  if (!badge || !window.fetch) return;
+  var userBox = document.getElementById("pc-user");
+  var TEXT = { up: "в сети", down: "не в сети", noip: "сеть: адрес неизвестен", wait: "сеть: не проверить" };
+  function show(data) {
+    badge.className = "badge online-badge online-" + data.state;
+    badge.textContent = TEXT[data.state] || "";
+    badge.hidden = data.state === "off";
+    var title = data.state === "up" ? "Отвечает на ping" + (data.ms != null ? " за " + Math.round(data.ms) + " мс" : "")
+      : data.state === "down" ? "Не отвечает на ping"
+      : data.state === "noip" ? "Нет адреса: ПК не найден в DNS и нет «IP: …» в примечании"
+      : (data.error || "Сервер не смог проверить");
+    if (data.ip) title += " · " + data.ip;
+    if (data.checked_at) title += " · проверено в " + data.checked_at;
+    badge.title = title;
+    if (!userBox) return;
+    var dd = userBox.querySelector("dd");
+    dd.textContent = "";
+    if (data.state !== "up") { userBox.hidden = true; return; }
+    userBox.hidden = false;
+    if (data.users_error) {
+      dd.className = "muted";
+      dd.textContent = "не удалось узнать: " + data.users_error;
+    } else if (!data.users || !data.users.length) {
+      dd.className = "muted";
+      dd.textContent = "никто не вошёл";
+    } else {
+      dd.className = "";
+      data.users.forEach(function (u, i) {
+        if (i) dd.appendChild(document.createTextNode(", "));
+        var el = document.createElement(u.url ? "a" : "span");
+        if (u.url) el.href = u.url;
+        el.textContent = u.name ? u.name + " (" + u.login + ")" : u.login;
+        dd.appendChild(el);
+      });
+    }
+  }
+  function load() {
+    fetch(badge.dataset.onlineUrl, { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) { if (data) show(data); })
+      .catch(function () {});
+  }
+  load();
+  setInterval(function () { if (!document.hidden) load(); }, 30000);
+})();

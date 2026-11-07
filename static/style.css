@@ -641,3 +641,12 @@ form.drop-target { outline: 2px dashed var(--accent); outline-offset: 4px; }
 .hist-sw_updated { border-left-color: var(--hist-updated); }
 .hist-hw { border-left-color: var(--hist-hw); }
 .hist-first, .hist-pc_added, .hist-pc_renamed, .hist-pc_removed, .hist-pc_status { border-left-color: var(--hist-pc); }
+
+/* ---------- в сети ли ПК (страница ПК) ---------- */
+h1 .online-badge { font-family: "Segoe UI", Roboto, sans-serif; font-size: 13px; }
+.online-badge::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 6px; vertical-align: 1px; }
+.online-up { background: var(--ok-soft); color: var(--ok); }
+.online-down { background: var(--chip); color: var(--muted); }
+.online-noip, .online-wait { background: var(--chip); color: var(--muted); }
+.online-wait::before { animation: netmap-pulse 1.2s ease-in-out infinite; }
+.pc-user dd { font-weight: 600; }

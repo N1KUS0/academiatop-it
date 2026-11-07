@@ -978,6 +978,78 @@ def auditorium_wake(code):
     return wake_redirect(url_for("auditorium", code=code))
 
 
+TEACHER_PC_NUM = inventory.ADMIN_PC_NUM  # ПК преподавателя: PC-xx-99 (в AD — PC-xx-ADMIN)
+PC_USERS_CACHE = 30                        # сколько секунд помнить, кто вошёл на ПК
+_pc_users_cache = {}                       # ip -> (когда, логины, ошибка)
+_pc_users_lock = threading.Lock()
+
+
+def pc_users(ip):
+    """Кто сейчас вошёл в Windows на ПК (с кэшем). -> (логины, ошибка или "")."""
+    now = time.time()
+    with _pc_users_lock:
+        cached = _pc_users_cache.get(ip)
+        if cached and now - cached[0] < PC_USERS_CACHE:
+            return cached[1], cached[2]
+    users, error, _out = shutdown.logged_on_users(ip, INSTANCE_DIR)
+    if error:
+        app.logger.warning("pc users %s: %s", ip, error)
+    with _pc_users_lock:
+        _pc_users_cache[ip] = (now, users, error)
+    return users, error
+
+
+def computer_online_state(pc):
+    """В сети ли ПК: (состояние, данные ping, время проверки, ошибка). Проверка — по всему списку ПК,
+    как у блока «ПК в сети», чтобы обе страницы пользовались одним кэшем ping."""
+    if pc["status"] == "decommissioned":
+        return "off", {}, None, None
+    up, checked_at, error, details = netmap.status(list_computers())
+    host = pc["hostname"]
+    if host not in details:
+        return "noip", {}, checked_at, error
+    if error:
+        return "wait", {}, checked_at, error
+    return ("up", up[host], checked_at, None) if host in up else ("down", {}, checked_at, None)
+
+
+@app.route("/api/computers/<hostname>/online")
+def computer_online(hostname):
+    """Статус «В сети / Не в сети» для страницы ПК; у ПК преподавателя администратор видит ещё, кто вошёл."""
+    pc = get_computer_or_404(hostname)
+    state, ping, checked_at, error = computer_online_state(pc)
+    data = {"state": state, "error": error, "ms": ping.get("ms"),
+            "checked_at": datetime.fromtimestamp(checked_at).strftime("%H:%M:%S") if checked_at else None}
+    if is_admin():
+        data["ip"] = ping.get("ip")
+    if state == "up" and pc["num"] == TEACHER_PC_NUM and is_admin():
+        logins, users_error = pc_users(ping["ip"])
+        known = {r["username"].lower(): r for r in get_db().execute("SELECT id, username, full_name FROM users")}
+        data["users"] = [{"login": login,
+                          "name": (known[login.lower()]["full_name"] or None) if login.lower() in known else None,
+                          "url": url_for("user_profile", user_id=known[login.lower()]["id"]) if login.lower() in known
+                          else None} for login in logins]
+        data["users_error"] = users_error or None
+    resp = jsonify(data)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.cli.command("pc-user-check")
+@click.argument("hostname")
+def pc_user_check_command(hostname):
+    """Проверить на сервере: в сети ли ПК и кто в него вошёл (показывает и ответ rpcclient как есть)."""
+    pc = get_computer_or_404(hostname)
+    state, ping, _at, error = computer_online_state(pc)
+    click.echo(f"{pc['hostname']}: {dict(up='в сети', down='не в сети', noip='адрес неизвестен', off='списан', wait='не проверить').get(state, state)}"
+               + (f", {ping['ip']}, {ping['ms']} мс" if ping else "") + (f" — {error}" if error else ""))
+    if state != "up":
+        return
+    users, users_error, out = shutdown.logged_on_users(ping["ip"], INSTANCE_DIR)
+    click.echo("Ответ rpcclient:\n" + (out.strip() or "(пусто)"))
+    click.echo(f"Ошибка: {users_error}" if users_error else f"Вошли: {', '.join(users) or 'никто'}")
+
+
 @app.route("/api/netmap")
 def netmap_status():
     """Какие ПК отвечают на ping: {hostname: "up" | "down" | "noip" | "off"}. Списанные не пингуются."""
@@ -1231,6 +1303,7 @@ def computer(hostname):
     events = history_rows(" WHERE (h.computer_id = ? OR h.hostname = ?)", (pc["id"], pc["hostname"]), limit=31)
     return render_template("computer.html", pc=pc, installs=installs, sw_names=software_names(),
                            open_tickets=open_tickets, pc_macs=netmap.macs_from_note(pc["note"]),
+                           is_teacher_pc=pc["num"] == TEACHER_PC_NUM,
                            events=events[:30], more_events=len(events) > 30)
 
 
