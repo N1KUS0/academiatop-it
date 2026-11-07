@@ -353,3 +353,25 @@ document.querySelectorAll('input[type="password"]').forEach(function (input) {
   refresh();
   schedule();
 })();
+
+// Светлая / тёмная тема. Пока не выбрана — как в системе; выбор запоминается в браузере.
+document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var root = document.documentElement;
+    var current = root.dataset.theme ||
+      (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    var next = current === "dark" ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("theme", next); } catch (e) {}
+  });
+});
+
+// Меню на телефоне: закрыть по Esc и при переходе по пункту.
+(function () {
+  var toggle = document.getElementById("nav-toggle");
+  if (!toggle) return;
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") toggle.checked = false; });
+  document.querySelectorAll(".sidebar a").forEach(function (a) {
+    a.addEventListener("click", function () { toggle.checked = false; });
+  });
+})();

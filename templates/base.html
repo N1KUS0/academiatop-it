@@ -1,71 +1,105 @@
-{% from "macros.html" import avatar %}<!doctype html>
+{% from "macros.html" import avatar %}{% from "icons.html" import icon %}<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="author" content="{{ SITE_AUTHOR }}">
   <title>{% block title %}Главная{% endblock %} — {{ SITE_NAME }}</title>
+  {# Тема — до загрузки стилей, чтобы страница не мигала светлой перед тёмной. Без выбора — как в системе. #}
+  <script>try { var t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <link rel="stylesheet" href="{{ static_url('style.css') }}">
   <link rel="icon" href="{{ static_url('favicon.svg') }}" type="image/svg+xml">
 </head>
-<body class="{% if is_admin %}admin{% endif %}">
-<header class="topbar">
-  <div class="wrap topbar-inner">
-    <a class="brand" href="{{ url_for('index') }}">
-      <span class="brand-mark">ТОП</span>
-      <span class="brand-text">{{ SITE_NAME }}{% if SITE_TAGLINE %}<small>{{ SITE_TAGLINE }}</small>{% endif %}</span>
-    </a>
-    {% if current_user %}
-    <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Меню">
-    <label for="nav-toggle" class="nav-burger" aria-hidden="true"><span></span></label>
-    {% set ep = request.endpoint or '' %}
-    <nav class="nav">
-      <a href="{{ url_for('index') }}" class="{{ 'on' if ep == 'index' }}">Главная</a>
-      <a href="{{ url_for('auditoriums') }}" class="{{ 'on' if ep.startswith('auditorium') }}">Аудитории</a>
-      <a href="{{ url_for('computers') }}" class="{{ 'on' if ep.startswith('computer') }}">Компьютеры</a>
-      <a href="{{ url_for('software_list') }}" class="{{ 'on' if ep.startswith('software') }}">Справочник ПО</a>
-      <a href="{{ url_for('search') }}" class="{{ 'on' if ep == 'search' }}">Поиск</a>
-      <a href="{{ url_for('history_page') }}" class="{{ 'on' if ep == 'history_page' }}" title="История изменений на ПК">История</a>
-      <a href="{{ url_for('tickets') }}" class="{{ 'on' if ep.startswith('ticket') }}">Заявки{% if tickets_unread %} <span class="nav-count" title="Заявки с новыми сообщениями">{{ tickets_unread }}</span>{% endif %}</a>
-      {% if is_admin %}
-        <a href="{{ url_for('import_page') }}" class="{{ 'on' if ep.startswith('import') }}">Импорт</a>
-        <a href="{{ url_for('data_page') }}" class="{{ 'on' if ep == 'data_page' }}">Данные</a>
-        <a href="{{ url_for('users_page') }}" class="{{ 'on' if ep.startswith('user') }}">Пользователи</a>
-      {% endif %}
-      <a href="{{ url_for('account') }}" class="{{ 'on' if ep == 'account' or (ep == 'user_profile' and request.view_args.user_id == current_user.id) }}"
-         title="{{ 'Сменить пароль' if is_admin else 'Мой профиль: имя, аватарка, пароль, мои заявки' }}">
-        {%- if not is_admin %}<span class="nav-user">{{ avatar(current_user.id, current_user.avatar, current_user.name, 24) }}{{ current_user.username }}</span>
-        {%- else %}{{ current_user.username }}{% endif %}</a>
-      <form method="post" action="{{ url_for('logout') }}" class="nav-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="nav-btn" title="Вы вошли как {{ current_user.username }}">Выйти</button>
-      </form>
-    </nav>
+<body class="{% if is_admin %}admin{% endif %}{% if current_user %} with-nav{% endif %}">
+{% macro theme_button(cls='') -%}
+  <button type="button" class="theme-toggle {{ cls }}" data-theme-toggle title="Светлая / тёмная тема">
+    {{ icon('moon', cls='icon-moon') }}{{ icon('sun', cls='icon-sun') }}<span class="theme-label"></span></button>
+{%- endmacro %}
+
+{% if current_user %}
+{% set ep = request.endpoint or '' %}
+{% macro nav_item(endpoint, label, name, on, extra='') -%}
+  <a href="{{ url_for(endpoint) }}" class="side-link{{ ' on' if on }}">{{ icon(name) }}<span>{{ label }}</span>{{ extra }}</a>
+{%- endmacro %}
+<input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Меню">
+<aside class="sidebar" aria-label="Меню">
+  <a class="brand" href="{{ url_for('index') }}">
+    <span class="brand-mark">ТОП</span>
+    <span class="brand-text">{{ SITE_NAME }}{% if SITE_TAGLINE %}<small>{{ SITE_TAGLINE }}</small>{% endif %}</span>
+  </a>
+  <label for="nav-toggle" class="side-close" title="Закрыть меню">{{ icon('close', 20) }}</label>
+  <nav class="side-nav">
+    {% set unread = ('<span class="nav-count" title="Заявки с новыми сообщениями">' ~ tickets_unread ~ '</span>')|safe if tickets_unread else '' %}
+    {{ nav_item('index', 'Главная', 'home', ep == 'index') }}
+    {{ nav_item('tickets', 'Заявки', 'tickets', ep.startswith('ticket'), unread) }}
+    <div class="side-group">Учёт</div>
+    {{ nav_item('auditoriums', 'Аудитории', 'auditoriums', ep.startswith('auditorium')) }}
+    {{ nav_item('computers', 'Компьютеры', 'computers', ep.startswith('computer')) }}
+    {{ nav_item('software_list', 'Справочник ПО', 'software', ep.startswith('software')) }}
+    {{ nav_item('history_page', 'История', 'history', ep == 'history_page') }}
+    {{ nav_item('search', 'Поиск', 'search', ep == 'search') }}
+    {% if is_admin %}
+    <div class="side-group">Администратор</div>
+    {{ nav_item('import_page', 'Импорт', 'import', ep.startswith('import')) }}
+    {{ nav_item('data_page', 'Данные', 'data', ep == 'data_page') }}
+    {{ nav_item('users_page', 'Пользователи', 'users', ep.startswith('user') and not (ep == 'user_profile' and request.view_args.user_id == current_user.id)) }}
     {% endif %}
+  </nav>
+  <div class="side-foot">
+    {{ theme_button() }}
+    <a href="{{ url_for('account') }}" class="side-link side-user{{ ' on' if ep == 'account' or (ep == 'user_profile' and request.view_args.user_id == current_user.id) }}"
+       title="{{ 'Сменить пароль' if is_admin else 'Мой профиль: имя, аватарка, пароль, мои заявки' }}">
+      {%- if is_admin %}{{ icon('user') }}{% else %}{{ avatar(current_user.id, current_user.avatar, current_user.name, 24) }}{% endif %}
+      <span>{{ current_user.username }}</span></a>
+    <form method="post" action="{{ url_for('logout') }}" class="nav-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="side-link side-logout" title="Вы вошли как {{ current_user.username }}">{{ icon('logout') }}<span>Выйти</span></button>
+    </form>
   </div>
+</aside>
+<label for="nav-toggle" class="side-backdrop" aria-hidden="true"></label>
+{% endif %}
+
+<div class="page">
+  <header class="mobile-top">
+    <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">ТОП</span><span class="brand-text">{{ SITE_NAME }}</span></a>
+    {{ theme_button('mobile-theme') }}
+  </header>
   {% if is_admin %}<div class="admin-strip">Режим редактирования</div>{% endif %}
-</header>
 
-<main class="wrap">
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for cat, msg in messages %}
-      <div class="flash flash-{{ cat }}">{{ msg }}</div>
-    {% endfor %}
-  {% endwith %}
-  {% block content %}{% endblock %}
-</main>
+  <main class="wrap">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash flash-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
 
-<footer class="footer wrap">
-  <span>{{ SITE_NAME }} · © 2026 by <b class="footer-author">{{ SITE_AUTHOR }}</b></span>
-  {% if current_user %}
-  <span class="footer-links">
-    {{ current_user.name }} ·
-    Выгрузка:
-    <a href="{{ url_for('export', kind='installations', fmt='xlsx') }}">Excel (всё)</a> ·
-    <a href="{{ url_for('export', kind='installations', fmt='csv') }}">CSV</a>
-  </span>
-  {% endif %}
-</footer>
+  <footer class="footer wrap">
+    <span>{{ SITE_NAME }} · © 2026 by <b class="footer-author">{{ SITE_AUTHOR }}</b></span>
+    {% if current_user %}
+    <span class="footer-links">
+      {{ current_user.name }} ·
+      Выгрузка:
+      <a href="{{ url_for('export', kind='installations', fmt='xlsx') }}">Excel (всё)</a> ·
+      <a href="{{ url_for('export', kind='installations', fmt='csv') }}">CSV</a>
+    </span>
+    {% endif %}
+  </footer>
+</div>
+
+{% if current_user %}
+{# Телефон: главные разделы — внизу, остальное — в меню «Ещё». #}
+<nav class="tabbar" aria-label="Главные разделы">
+  <a href="{{ url_for('index') }}" class="{{ 'on' if ep == 'index' }}">{{ icon('home', 22) }}<span>Главная</span></a>
+  <a href="{{ url_for('tickets') }}" class="{{ 'on' if ep.startswith('ticket') }}">{{ icon('tickets', 22) }}<span>Заявки</span>
+    {%- if tickets_unread %}<b class="nav-count">{{ tickets_unread }}</b>{% endif %}</a>
+  <a href="{{ url_for('computers') }}" class="{{ 'on' if ep.startswith('computer') }}">{{ icon('computers', 22) }}<span>ПК</span></a>
+  <a href="{{ url_for('history_page') }}" class="{{ 'on' if ep == 'history_page' }}">{{ icon('history', 22) }}<span>История</span></a>
+  <label for="nav-toggle">{{ icon('menu', 22) }}<span>Ещё</span></label>
+</nav>
+{% endif %}
 <script src="{{ static_url('app.js') }}"></script>
 </body>
 </html>
