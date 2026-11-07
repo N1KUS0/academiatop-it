@@ -649,4 +649,21 @@ h1 .online-badge { font-family: "Segoe UI", Roboto, sans-serif; font-size: 13px;
 .online-down { background: var(--chip); color: var(--muted); }
 .online-noip, .online-wait { background: var(--chip); color: var(--muted); }
 .online-wait::before { animation: netmap-pulse 1.2s ease-in-out infinite; }
-.pc-user dd { font-weight: 600; }
+
+/* ---------- плашка «Включение ПК» ---------- */
+.wake-box { border-left: 4px solid var(--info); }
+.wake-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.wake-head .link-btn { margin-left: auto; }
+.wake-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.wake-chip {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px; border-radius: 8px;
+  font-family: var(--mono); font-size: 13px; font-weight: 600; background: var(--chip); color: var(--ink-2);
+}
+.wake-chip small { font-family: "Segoe UI", Roboto, sans-serif; font-weight: 400; font-size: 12px; }
+.wake-chip:hover { text-decoration: none; filter: brightness(.97); }
+.wake-up { background: var(--ok-soft); color: var(--ok); }
+.wake-failed.wake-chip, .wake-chip.wake-failed { background: var(--bad-soft); color: var(--bad); }
+.wake-already { background: var(--ok-soft); color: var(--ok); opacity: .75; }
+.wake-waiting small { font-variant-numeric: tabular-nums; }
+.wake-waiting::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--info); align-self: center; animation: netmap-pulse 1.2s ease-in-out infinite; }
+p.wake-failed { margin: 10px 0 0; color: var(--bad-text); }

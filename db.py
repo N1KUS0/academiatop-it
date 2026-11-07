@@ -65,6 +65,18 @@ CREATE TABLE IF NOT EXISTS pc_history (
 CREATE INDEX IF NOT EXISTS pc_history_pc ON pc_history (computer_id, id);
 CREATE INDEX IF NOT EXISTS pc_history_at ON pc_history (at);
 
+-- «Включить» (Wake-on-LAN): ответил ли ПК на ping за несколько минут. Задания старше суток удаляются.
+CREATE TABLE IF NOT EXISTS wake_jobs (
+    id          INTEGER PRIMARY KEY,
+    computer_id INTEGER REFERENCES computers(id) ON DELETE CASCADE,
+    hostname    TEXT NOT NULL,
+    started_at  REAL NOT NULL,
+    finished_at REAL,
+    state       TEXT NOT NULL DEFAULT 'waiting',  -- waiting / up / failed / already (уже был в сети) / lost (проверка прервалась)
+    who         TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS wake_jobs_started ON wake_jobs (started_at);
+
 -- Журнал импортов автовыгрузки
 CREATE TABLE IF NOT EXISTS imports (
     id         INTEGER PRIMARY KEY,

@@ -47,9 +47,6 @@
 {% endif %}
 
 <dl class="card specs">
-  {% if is_admin and is_teacher_pc and pc.status != 'decommissioned' %}
-  <div class="wide pc-user" id="pc-user" hidden><dt>Сейчас за ПК</dt><dd></dd></div>
-  {% endif %}
   <div><dt>Аудитория</dt><dd><a href="{{ url_for('auditorium', code=pc.aud_code) }}">{{ pc.aud_code }}</a></dd></div>
   <div><dt>Инв. номер</dt><dd>{{ pc.inv_number or '—' }}</dd></div>
   <div><dt>ОС</dt><dd>{{ pc.os or '—' }} {{ pc.os_version }}</dd></div>

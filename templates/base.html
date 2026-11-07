@@ -68,6 +68,18 @@
   {% if is_admin %}<div class="admin-strip">Режим редактирования</div>{% endif %}
 
   <main class="wrap">
+    {% if wake_jobs %}
+    {# Ход включения по «Включить»: ответил ли ПК на ping. Заполняет и обновляет app.js. #}
+    <div class="card wake-box" id="wake-box" data-url="{{ url_for('wake_status') }}"
+         data-jobs="{{ wake_jobs|tojson|forceescape }}" data-watch="{{ WAKE_WATCH_SECONDS }}">
+      <div class="wake-head">
+        <b>Включение ПК</b><span class="wake-summary muted small"></span>
+        <button type="button" class="link-btn small" data-wake-hide>Скрыть</button>
+      </div>
+      <div class="wake-chips"></div>
+      <p class="wake-failed small" hidden></p>
+    </div>
+    {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
         <div class="flash flash-{{ cat }}">{{ msg }}</div>

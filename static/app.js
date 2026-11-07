@@ -376,11 +376,10 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
   });
 })();
 
-// Страница ПК: «В сети / Не в сети» и (у ПК преподавателя, для администратора) кто сейчас вошёл.
+// Страница ПК: «в сети / не в сети».
 (function () {
   var badge = document.querySelector("[data-online-url]");
   if (!badge || !window.fetch) return;
-  var userBox = document.getElementById("pc-user");
   var TEXT = { up: "в сети", down: "не в сети", noip: "сеть: адрес неизвестен", wait: "сеть: не проверить" };
   function show(data) {
     badge.className = "badge online-badge online-" + data.state;
@@ -393,27 +392,6 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
     if (data.ip) title += " · " + data.ip;
     if (data.checked_at) title += " · проверено в " + data.checked_at;
     badge.title = title;
-    if (!userBox) return;
-    var dd = userBox.querySelector("dd");
-    dd.textContent = "";
-    if (data.state !== "up") { userBox.hidden = true; return; }
-    userBox.hidden = false;
-    if (data.users_error) {
-      dd.className = "muted";
-      dd.textContent = "не удалось узнать: " + data.users_error;
-    } else if (!data.users || !data.users.length) {
-      dd.className = "muted";
-      dd.textContent = "никто не вошёл";
-    } else {
-      dd.className = "";
-      data.users.forEach(function (u, i) {
-        if (i) dd.appendChild(document.createTextNode(", "));
-        var el = document.createElement(u.url ? "a" : "span");
-        if (u.url) el.href = u.url;
-        el.textContent = u.name ? u.name + " (" + u.login + ")" : u.login;
-        dd.appendChild(el);
-      });
-    }
   }
   function load() {
     fetch(badge.dataset.onlineUrl, { credentials: "same-origin", headers: { Accept: "application/json" } })
@@ -423,4 +401,80 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
   }
   load();
   setInterval(function () { if (!document.hidden) load(); }, 30000);
+})();
+
+// Плашка «Включение ПК»: после «Включить» сервер 3 минуты ждёт ответа на ping; здесь — ход и итог.
+(function () {
+  var box = document.getElementById("wake-box");
+  if (!box) return;
+  var watch = parseInt(box.dataset.watch, 10) || 180;
+  var chips = box.querySelector(".wake-chips"), summary = box.querySelector(".wake-summary");
+  var failedNote = box.querySelector(".wake-failed");
+  var hidden = 0, jobs = [], fetchedAt = Date.now(), timer = null;
+  try { hidden = parseInt(localStorage.getItem("wake-hidden"), 10) || 0; } catch (e) {}
+  function dur(s) { s = Math.max(0, Math.round(s)); return s >= 60 ? Math.floor(s / 60) + " мин " + (s % 60) + " с" : s + " с"; }
+  function clock(s) { s = Math.max(0, Math.round(s)); var m = Math.floor(s / 60), r = s % 60; return m + ":" + (r < 10 ? "0" : "") + r; }
+  function render() {
+    var maxId = jobs.reduce(function (m, j) { return Math.max(m, j.id); }, 0);
+    box.hidden = !jobs.length || maxId <= hidden;
+    if (box.hidden) return;
+    var count = { up: 0, waiting: 0, failed: 0, already: 0, lost: 0 }, failed = [];
+    var passed = (Date.now() - fetchedAt) / 1000;
+    chips.textContent = "";
+    jobs.forEach(function (j) {
+      count[j.state] = (count[j.state] || 0) + 1;
+      var el = document.createElement(j.url ? "a" : "span");
+      if (j.url) el.href = j.url;
+      el.className = "wake-chip wake-" + j.state;
+      var note = { up: "за " + dur(j.seconds), failed: "не включился", already: "уже в сети", lost: "не проверено" }[j.state]
+        || clock(j.seconds + passed) + " из " + clock(watch);
+      el.title = {
+        waiting: "Ждём ответа на ping — до " + Math.round(watch / 60) + " мин",
+        up: "Ответил на ping через " + dur(j.seconds) + " после «Включить»",
+        failed: "Не ответил на ping за " + Math.round(watch / 60) + " мин",
+        already: "Был в сети уже в момент «Включить»",
+        lost: "Проверка прервалась (перезапуск сервера) — смотрите «ПК в сети»"
+      }[j.state] + (j.who ? " · включал: " + j.who : "");
+      el.textContent = j.hostname + " ";
+      var small = document.createElement("small");
+      small.textContent = note;
+      el.appendChild(small);
+      chips.appendChild(el);
+      if (j.state === "failed") failed.push(j.hostname);
+    });
+    var parts = [];
+    if (count.up) parts.push("включились: " + count.up);
+    if (count.waiting) parts.push("ждём ответа: " + count.waiting);
+    if (count.failed) parts.push("не включились: " + count.failed);
+    if (count.already) parts.push("уже были в сети: " + count.already);
+    if (count.lost) parts.push("не проверено: " + count.lost);
+    summary.textContent = parts.join(" · ");
+    failedNote.hidden = !failed.length;
+    failedNote.textContent = failed.length
+      ? "Не удалось включить " + failed.join(", ") + ": нет ответа на ping за " + Math.round(watch / 60) +
+        " мин. Проверьте питание и сетевой кабель, включён ли Wake-on-LAN в BIOS и в настройках сетевой карты."
+      : "";
+  }
+  function poll() {
+    fetch(box.dataset.url, { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        jobs = data.jobs; fetchedAt = Date.now(); render(); schedule();
+      })
+      .catch(schedule);
+  }
+  function schedule() {
+    clearTimeout(timer);
+    if (jobs.some(function (j) { return j.state === "waiting"; })) timer = setTimeout(poll, 5000);
+  }
+  box.querySelector("[data-wake-hide]").addEventListener("click", function () {
+    hidden = jobs.reduce(function (m, j) { return Math.max(m, j.id); }, 0);
+    try { localStorage.setItem("wake-hidden", String(hidden)); } catch (e) {}
+    render();
+  });
+  try { jobs = JSON.parse(box.dataset.jobs); } catch (e) { jobs = []; }
+  render();
+  schedule();
+  setInterval(function () { if (jobs.some(function (j) { return j.state === "waiting"; })) render(); }, 1000);
 })();

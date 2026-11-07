@@ -842,6 +842,100 @@ def wake_computers(computers):
     return woken, no_mac
 
 
+WAKE_WATCH_SECONDS = 180      # сколько ждать ответа на ping после «Включить»
+WAKE_CHECK_EVERY = 10         # как часто проверять, секунд
+WAKE_SHOW_SECONDS = 15 * 60   # сколько показывать результат в плашке «Включение ПК»
+
+
+def start_wake_watch(computers):
+    """После «Включить»: записать задания и в фоне проверять ping, пока ПК не ответит или не выйдет время.
+    Задания — в базе, а не в памяти: сервер работает несколькими процессами, плашку может показать любой."""
+    conn, now, who = get_db(), time.time(), current_user()["name"]
+    up, _at, error, _details = netmap.status(list_computers())
+    ids = []
+    for c in computers:
+        if conn.execute("SELECT 1 FROM wake_jobs WHERE computer_id = ? AND state = 'waiting'", (c["id"],)).fetchone():
+            continue  # уже следим за этим ПК
+        if not error and c["hostname"] in up:
+            conn.execute("INSERT INTO wake_jobs (computer_id, hostname, started_at, finished_at, state, who) "
+                         "VALUES (?, ?, ?, ?, 'already', ?)", (c["id"], c["hostname"], now, now, who))
+        else:
+            ids.append(conn.execute("INSERT INTO wake_jobs (computer_id, hostname, started_at, who) VALUES (?, ?, ?, ?)",
+                                    (c["id"], c["hostname"], now, who)).lastrowid)
+    conn.execute("DELETE FROM wake_jobs WHERE started_at < ?", (now - 86400,))
+    conn.commit()
+    if ids:
+        threading.Thread(target=_watch_wake, args=(ids,), daemon=True).start()
+
+
+def _watch_wake(ids):
+    """Фоновая проверка: раз в WAKE_CHECK_EVERY секунд — ping (через тот же кэш, что у блока «ПК в сети»)."""
+    with app.app_context():
+        deadline = time.time() + WAKE_WATCH_SECONDS
+        pending = set(ids)
+        while pending:
+            time.sleep(WAKE_CHECK_EVERY)
+            conn = get_db()
+            rows = {r["id"]: r for r in conn.execute(
+                "SELECT * FROM wake_jobs WHERE state = 'waiting' AND id IN (%s)" % ",".join("?" * len(pending)),
+                tuple(pending))}
+            pending &= set(rows)
+            if not pending:
+                break
+            try:
+                computers = list_computers()
+                up, _at, error, _details = netmap.status(computers)
+            except Exception as e:  # noqa: BLE001 — проверка в фоне не должна падать молча и навсегда
+                up, error, computers = {}, str(e), []
+            names = {c["id"]: c["hostname"] for c in computers}  # ПК могли переименовать, пока он включался
+            now = time.time()
+            for job_id in list(pending):
+                row = rows[job_id]
+                host = names.get(row["computer_id"], row["hostname"])
+                if not error and host in up:
+                    state = "up"
+                elif now >= deadline:
+                    state = "failed"
+                    app.logger.warning("wol: %s did not answer ping in %d s%s", host, WAKE_WATCH_SECONDS,
+                                       f" ({error})" if error else "")
+                else:
+                    continue
+                conn.execute("UPDATE wake_jobs SET state = ?, finished_at = ?, hostname = ? WHERE id = ?",
+                             (state, now, host, job_id))
+                pending.discard(job_id)
+            conn.commit()
+
+
+def recent_wake_jobs():
+    """Задания включения за последние WAKE_SHOW_SECONDS — для плашки у администратора."""
+    conn, now = get_db(), time.time()
+    # Проверка прервалась (сервер перезапустили) — не держим «включается…» вечно.
+    conn.execute("UPDATE wake_jobs SET state = 'lost', finished_at = ? WHERE state = 'waiting' AND started_at < ?",
+                 (now, now - WAKE_WATCH_SECONDS - 60))
+    conn.commit()
+    jobs = []
+    for r in conn.execute("SELECT * FROM wake_jobs WHERE started_at >= ? ORDER BY hostname, id",
+                          (now - WAKE_SHOW_SECONDS,)):
+        j = dict(r)
+        j["seconds"] = round((j["finished_at"] or now) - j["started_at"])
+        j["url"] = url_for("computer", hostname=j["hostname"]) if parse_hostname(j["hostname"]) else None
+        jobs.append(j)
+    return jobs
+
+
+@app.context_processor
+def wake_context():
+    return {"wake_jobs": recent_wake_jobs() if is_admin() else [], "WAKE_WATCH_SECONDS": WAKE_WATCH_SECONDS}
+
+
+@app.route("/api/wake-status")
+@admin_required
+def wake_status():
+    resp = jsonify(jobs=recent_wake_jobs(), watch_seconds=WAKE_WATCH_SECONDS)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 INSTANCE_DIR = os.path.dirname(app.config["DATABASE"])
 
 
@@ -957,7 +1051,8 @@ def computer_wake(hostname):
     else:
         woken, _ = wake_computers([pc])
         if woken:
-            flash(f"{pc['hostname']}: команда на включение отправлена. Загрузка займёт 1–2 минуты.", "success")
+            start_wake_watch([pc])
+            flash(f"{pc['hostname']}: команда на включение отправлена. Ход включения — вверху страницы.", "success")
         else:
             flash(f"У {pc['hostname']} неизвестен MAC-адрес: впишите «MAC: …» в примечание.", "warning")
     return wake_redirect(url_for("computer", hostname=pc["hostname"]))
@@ -967,36 +1062,17 @@ def computer_wake(hostname):
 @admin_required
 def auditorium_wake(code):
     aud = get_auditorium_or_404(code)
-    woken, no_mac = wake_computers(list_computers(" WHERE c.auditorium_id = ?", (aud["id"],)))
+    computers = list_computers(" WHERE c.auditorium_id = ?", (aud["id"],))
+    woken, no_mac = wake_computers(computers)
     code = aud_code(aud["num"])
     if woken:
-        flash(f"{code}: команда на включение отправлена на {len(woken)} ПК. Загрузка займёт 1–2 минуты.", "success")
+        start_wake_watch([c for c in computers if c["hostname"] in woken])
+        flash(f"{code}: команда на включение отправлена на {len(woken)} ПК. Ход включения — вверху страницы.", "success")
     if no_mac:
         flash(f"Без MAC-адреса, не включены: {', '.join(no_mac)}.", "warning")
     if not woken and not no_mac:
         flash(f"В {code} нет компьютеров для включения.", "info")
     return wake_redirect(url_for("auditorium", code=code))
-
-
-TEACHER_PC_NUM = inventory.ADMIN_PC_NUM  # ПК преподавателя: PC-xx-99 (в AD — PC-xx-ADMIN)
-PC_USERS_CACHE = 30                        # сколько секунд помнить, кто вошёл на ПК
-_pc_users_cache = {}                       # ip -> (когда, логины, ошибка)
-_pc_users_lock = threading.Lock()
-
-
-def pc_users(ip):
-    """Кто сейчас вошёл в Windows на ПК (с кэшем). -> (логины, ошибка или "")."""
-    now = time.time()
-    with _pc_users_lock:
-        cached = _pc_users_cache.get(ip)
-        if cached and now - cached[0] < PC_USERS_CACHE:
-            return cached[1], cached[2]
-    users, error, _out = shutdown.logged_on_users(ip, INSTANCE_DIR)
-    if error:
-        app.logger.warning("pc users %s: %s", ip, error)
-    with _pc_users_lock:
-        _pc_users_cache[ip] = (now, users, error)
-    return users, error
 
 
 def computer_online_state(pc):
@@ -1015,39 +1091,16 @@ def computer_online_state(pc):
 
 @app.route("/api/computers/<hostname>/online")
 def computer_online(hostname):
-    """Статус «В сети / Не в сети» для страницы ПК; у ПК преподавателя администратор видит ещё, кто вошёл."""
+    """Статус «В сети / Не в сети» для страницы ПК."""
     pc = get_computer_or_404(hostname)
     state, ping, checked_at, error = computer_online_state(pc)
     data = {"state": state, "error": error, "ms": ping.get("ms"),
             "checked_at": datetime.fromtimestamp(checked_at).strftime("%H:%M:%S") if checked_at else None}
     if is_admin():
         data["ip"] = ping.get("ip")
-    if state == "up" and pc["num"] == TEACHER_PC_NUM and is_admin():
-        logins, users_error = pc_users(ping["ip"])
-        known = {r["username"].lower(): r for r in get_db().execute("SELECT id, username, full_name FROM users")}
-        data["users"] = [{"login": login,
-                          "name": (known[login.lower()]["full_name"] or None) if login.lower() in known else None,
-                          "url": url_for("user_profile", user_id=known[login.lower()]["id"]) if login.lower() in known
-                          else None} for login in logins]
-        data["users_error"] = users_error or None
     resp = jsonify(data)
     resp.headers["Cache-Control"] = "no-store"
     return resp
-
-
-@app.cli.command("pc-user-check")
-@click.argument("hostname")
-def pc_user_check_command(hostname):
-    """Проверить на сервере: в сети ли ПК и кто в него вошёл (показывает и ответ rpcclient как есть)."""
-    pc = get_computer_or_404(hostname)
-    state, ping, _at, error = computer_online_state(pc)
-    click.echo(f"{pc['hostname']}: {dict(up='в сети', down='не в сети', noip='адрес неизвестен', off='списан', wait='не проверить').get(state, state)}"
-               + (f", {ping['ip']}, {ping['ms']} мс" if ping else "") + (f" — {error}" if error else ""))
-    if state != "up":
-        return
-    users, users_error, out = shutdown.logged_on_users(ping["ip"], INSTANCE_DIR)
-    click.echo("Ответ rpcclient:\n" + (out.strip() or "(пусто)"))
-    click.echo(f"Ошибка: {users_error}" if users_error else f"Вошли: {', '.join(users) or 'никто'}")
 
 
 @app.route("/api/netmap")
@@ -1303,7 +1356,6 @@ def computer(hostname):
     events = history_rows(" WHERE (h.computer_id = ? OR h.hostname = ?)", (pc["id"], pc["hostname"]), limit=31)
     return render_template("computer.html", pc=pc, installs=installs, sw_names=software_names(),
                            open_tickets=open_tickets, pc_macs=netmap.macs_from_note(pc["note"]),
-                           is_teacher_pc=pc["num"] == TEACHER_PC_NUM,
                            events=events[:30], more_events=len(events) > 30)
 
 
