@@ -90,6 +90,10 @@ with app.app_context():
 LOGIN_MAX_FAILURES = 5
 LOGIN_WINDOW = 15 * 60
 
+# Последняя активность пользователя: пишется по Москве, независимо от часового пояса сервера.
+MOSCOW_TZ = timezone(timedelta(hours=3))
+ACTIVITY_EVERY = 60  # секунд между записями в базу
+
 
 def client_ip():
     # X-Real-IP всегда перезаписывает nginx сервера академии (для зеркала — реальным IP посетителя).
@@ -132,7 +136,26 @@ def current_user():
                                must_change=bool(row["must_change_password"]))
         if g._user and now - session.get("seen", 0) > 60:
             session["seen"] = now
+        if g._user and g._user["id"] is not None:
+            touch_last_active(g._user["id"], now)
     return g._user
+
+
+def moscow_now_str():
+    return datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M")
+
+
+def touch_last_active(user_id, now):
+    """Записать время последней активности (не чаще раза в минуту). Фоновые опросы /api/ активностью не считаются."""
+    if request.path.startswith("/api/") or now - session.get("active", 0) <= ACTIVITY_EVERY:
+        return
+    session["active"] = now
+    conn = get_db()
+    try:
+        conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (moscow_now_str(), user_id))
+        conn.commit()
+    except sqlite3.OperationalError as e:  # база занята — не повод ломать страницу, запишем при следующем заходе
+        app.logger.warning("last activity not saved: user_id=%s: %s", user_id, e)
 
 
 def is_admin():
@@ -253,8 +276,8 @@ def login():
             else:
                 session["uid"] = row["id"]
                 session["pwm"] = password_marker(row["password_hash"])
-                conn.execute("UPDATE users SET last_login = ? WHERE id = ?",
-                             (time.strftime("%Y-%m-%d %H:%M"), row["id"]))
+                session["active"] = int(time.time())
+                conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (moscow_now_str(), row["id"]))
             conn.commit()
             app.logger.warning("login ok: user=%s ip=%s", username, ip)
             session.permanent = True
@@ -787,6 +810,15 @@ def ru_date(value):
     try:
         return date.fromisoformat(value).strftime("%d.%m.%Y")
     except ValueError:
+        return value
+
+
+@app.template_filter("ru_datetime")
+def ru_datetime(value):
+    """«2026-11-08 14:30» -> «08.11.2026 14:30»."""
+    try:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M").strftime("%d.%m.%Y %H:%M")
+    except (TypeError, ValueError):
         return value
 
 

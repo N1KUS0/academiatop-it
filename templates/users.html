@@ -20,7 +20,7 @@
 {% if users %}
 <div class="table-wrap">
   <table class="table">
-    <thead><tr><th>Логин</th><th>Имя</th><th class="num">Заявок</th><th>Создан</th><th>Последний вход</th><th>Новый пароль</th><th></th></tr></thead>
+    <thead><tr><th>Логин</th><th>Имя</th><th class="num">Заявок</th><th>Создан</th><th>Последняя активность</th><th>Новый пароль</th><th></th></tr></thead>
     <tbody>
     {% for u in users %}
       <tr>
@@ -30,7 +30,7 @@
         <td>{{ u.full_name or '—' }}</td>
         <td class="num">{{ u.tickets or '—' }}</td>
         <td>{{ u.created_at | ru_date }}</td>
-        <td>{{ u.last_login or 'ещё не входил' }}</td>
+        <td>{{ u.last_login | ru_datetime or 'ещё не входил' }}</td>
         <td>
           <form method="post" action="{{ url_for('user_password', user_id=u.id) }}" class="inline">
             {{ csrf() }}

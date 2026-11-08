@@ -14,7 +14,7 @@
 {% if is_admin %}
 <dl class="card specs">
   <div><dt>Создан</dt><dd>{{ user.created_at | ru_date }}</dd></div>
-  <div><dt>Последний вход</dt><dd>{{ user.last_login or 'ещё не входил' }}</dd></div>
+  <div><dt>Последняя активность</dt><dd>{{ user.last_login | ru_datetime or 'ещё не входил' }}</dd></div>
   <div><dt>Заявок</dt><dd>{{ tickets|length }}</dd></div>
 </dl>
 {% endif %}
