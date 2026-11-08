@@ -1,50 +1,60 @@
 {% extends "base.html" %}
 {% from "macros.html" import cat_badge, lic_badge %}
+{% from "icons.html" import icon %}
 {% block title %}Справочник ПО{% endblock %}
+{% macro sort_th(key, label, cls='', first='asc', type='text') -%}
+  <th class="{{ cls }}" data-sort-key="{{ key }}" data-sort-first="{{ first }}" data-sort-type="{{ type }}">
+    <button type="button" class="th-sort">{{ label }}{{ icon('sort', 14) }}</button></th>
+{%- endmacro %}
 {% block content %}
 <div class="page-head">
-  <h1>Справочник ПО <small class="muted">{{ items|length }}</small></h1>
+  <h1>Справочник ПО <small class="muted" id="sw-count">{{ items|length }}</small></h1>
   <div class="actions">
     {% if is_admin %}<a class="btn btn-primary" href="{{ url_for('software_new') }}">+ Программа</a>{% endif %}
     <a class="btn" href="{{ url_for('export', kind='software', fmt='xlsx') }}">Excel</a>
   </div>
 </div>
 
-<form class="card filters" method="get">
+<form class="card filters" id="sw-filters" method="get" autocomplete="off">
   <label class="grow">Поиск <input type="search" name="q" value="{{ q }}" placeholder="название или производитель"></label>
   <label>Категория
-    <select name="category" onchange="this.form.submit()">
+    <select name="category">
       <option value="">Все</option>
       {% for k, v in CATEGORIES.items() %}<option value="{{ k }}" {{ 'selected' if category == k }}>{{ v }}</option>{% endfor %}
     </select>
   </label>
   <label>Лицензия
-    <select name="license" onchange="this.form.submit()">
+    <select name="license">
       <option value="">Любая</option>
       {% for k, v in LICENSE_TYPES.items() %}<option value="{{ k }}" {{ 'selected' if license_type == k }}>{{ v }}</option>{% endfor %}
     </select>
   </label>
-  <button class="btn">Найти</button>
+  <button type="button" class="btn" id="sw-reset" hidden>Сбросить</button>
 </form>
 
 {% if items %}
-<div class="table-wrap">
-<table class="table">
-  <thead><tr><th>Название</th><th>Производитель</th><th>Категория</th><th>Лицензия</th><th class="num">Установлено на</th></tr></thead>
+<div class="table-wrap" id="sw-wrap">
+<table class="table" id="sw-table">
+  <thead><tr>
+    {{ sort_th('name', 'Название') }}
+    {{ sort_th('vendor', 'Производитель') }}
+    {{ sort_th('category', 'Категория') }}
+    {{ sort_th('license', 'Лицензия') }}
+    {{ sort_th('count', 'Установлено на', 'num', 'desc', 'num') }}
+  </tr></thead>
   <tbody>
   {% for s in items %}
-  <tr>
+  <tr data-search="{{ s.name }} {{ s.vendor or '' }}" data-category="{{ s.category }}" data-license="{{ s.license_type }}">
     <td><a href="{{ url_for('software', sw_id=s.id) }}" class="strong">{{ s.name }}</a></td>
-    <td>{{ s.vendor or '—' }}</td>
+    <td data-sort="{{ s.vendor or '' }}">{{ s.vendor or '—' }}</td>
     <td>{{ cat_badge(s.category) }}</td>
     <td>{{ lic_badge(s.license_type) }}</td>
-    <td class="num">{{ s.cnt }} ПК</td>
+    <td class="num" data-sort="{{ s.cnt }}">{{ s.cnt }} ПК</td>
   </tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
-{% else %}
-<div class="card empty">Ничего не найдено.</div>
 {% endif %}
+<div class="card empty" id="sw-empty"{% if items %} hidden{% endif %}>Ничего не найдено.</div>
 {% endblock %}

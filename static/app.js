@@ -130,6 +130,101 @@ document.querySelectorAll("[data-filter-table]").forEach(function (input) {
   check();
 })();
 
+// Справочник ПО: мгновенный фильтр и сортировка по столбцам. Состояние хранится в адресе страницы.
+(function () {
+  var form = document.getElementById("sw-filters");
+  var table = document.getElementById("sw-table");
+  if (!form || !table) return;
+  var tbody = table.tBodies[0];
+  var rows = Array.prototype.slice.call(tbody.rows);  // исходный порядок (по названию) — для равных значений
+  var headers = Array.prototype.slice.call(table.querySelectorAll("th[data-sort-key]"));
+  var collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });  // en: латиница раньше кириллицы
+  var count = document.getElementById("sw-count");
+  var reset = document.getElementById("sw-reset");
+  var wrap = document.getElementById("sw-wrap");
+  var empty = document.getElementById("sw-empty");
+  var params = new URLSearchParams(location.search);
+  var sort = { key: "name", dir: "asc" };
+  if (headers.some(function (th) { return th.dataset.sortKey === params.get("sort"); })) sort.key = params.get("sort");
+  if (params.get("dir") === "desc") sort.dir = "desc";
+
+  function value(tr, index) {
+    var td = tr.cells[index];
+    return "sort" in td.dataset ? td.dataset.sort : td.textContent.trim();
+  }
+
+  function applySort() {
+    var index = 0, numeric = false;
+    headers.forEach(function (th, i) {
+      if (th.dataset.sortKey === sort.key) {
+        index = i;
+        numeric = th.dataset.sortType === "num";
+        th.setAttribute("aria-sort", sort.dir === "asc" ? "ascending" : "descending");
+      } else {
+        th.removeAttribute("aria-sort");
+      }
+    });
+    var sign = sort.dir === "asc" ? 1 : -1;
+    rows.slice().sort(function (a, b) {
+      var x = value(a, index), y = value(b, index);
+      if (!x || !y) return x ? -1 : y ? 1 : 0;  // пустые значения всегда внизу
+      return sign * (numeric ? Number(x) - Number(y) : collator.compare(x, y));
+    }).forEach(function (tr) { tbody.appendChild(tr); });
+  }
+
+  function applyFilter() {
+    var q = form.elements.q.value.trim().toLowerCase();
+    var category = form.elements.category.value;
+    var license = form.elements.license.value;
+    var shown = 0;
+    rows.forEach(function (tr) {
+      var on = (!category || tr.dataset.category === category) && (!license || tr.dataset.license === license)
+        && tr.dataset.search.toLowerCase().indexOf(q) !== -1;
+      tr.hidden = !on;
+      if (on) shown++;
+    });
+    count.textContent = shown === rows.length ? rows.length : shown + " из " + rows.length;
+    wrap.hidden = shown === 0;
+    empty.hidden = shown !== 0;
+    reset.hidden = !(q || category || license);
+  }
+
+  function saveState() {
+    var state = new URLSearchParams();
+    ["q", "category", "license"].forEach(function (name) {
+      var v = form.elements[name].value.trim();
+      if (v) state.set(name, v);
+    });
+    if (sort.key !== "name" || sort.dir !== "asc") { state.set("sort", sort.key); state.set("dir", sort.dir); }
+    var query = state.toString();
+    history.replaceState(null, "", location.pathname + (query ? "?" + query : ""));
+  }
+
+  function onFilter() { applyFilter(); saveState(); }
+  form.addEventListener("input", onFilter);
+  form.addEventListener("change", onFilter);
+  form.addEventListener("submit", function (e) { e.preventDefault(); });
+  reset.addEventListener("click", function () {
+    form.elements.q.value = "";
+    form.elements.category.value = "";
+    form.elements.license.value = "";
+    onFilter();
+    form.elements.q.focus();
+  });
+  headers.forEach(function (th) {
+    th.querySelector(".th-sort").addEventListener("click", function () {
+      var key = th.dataset.sortKey;
+      sort.dir = sort.key === key ? (sort.dir === "asc" ? "desc" : "asc") : th.dataset.sortFirst;
+      sort.key = key;
+      applySort();
+      saveState();
+    });
+  });
+
+  applySort();
+  applyFilter();
+})();
+
 // Массовая отметка: «выбрать всю аудиторию» и счётчик
 (function () {
   var form = document.querySelector(".bulk-form");

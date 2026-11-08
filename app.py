@@ -1525,27 +1525,13 @@ def installation_delete(inst_id):
 
 @app.route("/software")
 def software_list():
-    q = request.args.get("q", "").strip()
-    category = request.args.get("category", "")
-    license_type = request.args.get("license", "")
-    where, params = [], []
-    if q:
-        where.append("(s.name LIKE ? OR s.vendor LIKE ?)")
-        params += [f"%{q}%", f"%{q}%"]
-    if category in CATEGORIES:
-        where.append("s.category = ?")
-        params.append(category)
-    if license_type in LICENSE_TYPES:
-        where.append("s.license_type = ?")
-        params.append(license_type)
-    sql = """SELECT s.*, COUNT(i.id) AS cnt FROM software s
-             LEFT JOIN installations i ON i.software_id = s.id"""
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    sql += " GROUP BY s.id ORDER BY s.name"
-    items = get_db().execute(sql, params).fetchall()
-    return render_template("software_list.html", items=items, q=q, category=category,
-                           license_type=license_type)
+    # Сервер отдаёт весь справочник, поиск и сортировка работают в браузере (static/app.js);
+    # параметры адреса только заполняют форму, чтобы фильтр сохранялся при возврате на страницу.
+    items = get_db().execute("""SELECT s.*, COUNT(i.id) AS cnt FROM software s
+                                LEFT JOIN installations i ON i.software_id = s.id
+                                GROUP BY s.id ORDER BY s.name""").fetchall()
+    return render_template("software_list.html", items=items, q=request.args.get("q", "").strip(),
+                           category=request.args.get("category", ""), license_type=request.args.get("license", ""))
 
 
 def save_software(existing=None):

@@ -303,6 +303,12 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
 .table th { font-size: 12px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); font-weight: 600; background: var(--surface-2); white-space: nowrap; }
+.th-sort { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; cursor: pointer; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+.th-sort:hover, th[aria-sort] .th-sort { color: var(--ink); }
+.th-sort .icon { flex: none; opacity: .55; }
+.th-sort:hover .icon, th[aria-sort] .th-sort .icon { opacity: 1; }
+th[aria-sort="ascending"] .sort-up, th[aria-sort="descending"] .sort-down { stroke: var(--accent); stroke-width: 3; }
+th[aria-sort="ascending"] .sort-down, th[aria-sort="descending"] .sort-up { opacity: .25; }
 .table tbody tr:last-child td, .table tr:last-child td { border-bottom: 0; }
 .table tbody tr:hover { background: var(--surface-2); }
 .table.compact td { padding: 6px 4px; }
