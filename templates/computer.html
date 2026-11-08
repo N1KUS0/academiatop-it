@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import csrf, status_badge, cat_badge, lic_badge, delete_button, author_link, history_list %}
+{% from "icons.html" import icon %}
 {% block title %}{{ pc.hostname }}{% endblock %}
 {% block content %}
 <nav class="crumbs">
@@ -22,12 +23,17 @@
     {% if pc.status != 'decommissioned' %}
     <form method="post" action="{{ url_for('computer_wake', hostname=pc.hostname) }}" class="inline">
       {{ csrf() }}
-      <button class="btn" {% if not pc_macs %}disabled title="MAC-адрес неизвестен: впишите «MAC: …» в примечание"{% else %}title="Wake-on-LAN: {{ pc_macs|join(', ') }}"{% endif %}>⏻ Включить</button>
+      <button class="btn" {% if not pc_macs %}disabled title="MAC-адрес неизвестен: впишите «MAC: …» в примечание"{% else %}title="Wake-on-LAN: {{ pc_macs|join(', ') }}"{% endif %}>{{ icon('power', 16) }}Включить</button>
+    </form>
+    <form method="post" action="{{ url_for('computer_reboot', hostname=pc.hostname) }}" class="inline"
+          data-confirm="Перезагрузить {{ pc.hostname }}? Пользователь увидит предупреждение, через минуту ПК перезагрузится — несохранённая работа пропадёт.">
+      {{ csrf() }}
+      <button class="btn btn-danger" {% if not shutdown_ready %}disabled title="Не задана учётная запись для выключения — см. «Данные» → «Выключение ПК»"{% else %}title="Перезагрузить через минуту с предупреждением пользователю"{% endif %}>{{ icon('restart', 16) }}Перезагрузить</button>
     </form>
     <form method="post" action="{{ url_for('computer_shutdown', hostname=pc.hostname) }}" class="inline"
           data-confirm="Выключить {{ pc.hostname }}? Пользователь увидит предупреждение, через минуту ПК выключится — несохранённая работа пропадёт.">
       {{ csrf() }}
-      <button class="btn btn-danger" {% if not shutdown_ready %}disabled title="Не задана учётная запись для выключения — см. «Данные» → «Выключение ПК»"{% else %}title="Выключить через минуту с предупреждением пользователю"{% endif %}>⏼ Выключить</button>
+      <button class="btn btn-danger" {% if not shutdown_ready %}disabled title="Не задана учётная запись для выключения — см. «Данные» → «Выключение ПК»"{% else %}title="Выключить через минуту с предупреждением пользователю"{% endif %}>{{ icon('power', 16) }}Выключить</button>
     </form>
     {% endif %}
     {% endif %}

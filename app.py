@@ -948,15 +948,17 @@ def shutdown_context():
     return {"shutdown_ready": is_admin() and bool(shutdown_account())}
 
 
-def shutdown_computers(computers):
-    """Выключить ПК, которые сейчас в сети. Адрес — только проверенный блоком «ПК в сети» (ответил именно этот ПК),
+def shutdown_computers(computers, reboot=False):
+    """Выключить (reboot=True — перезагрузить) ПК, которые сейчас в сети. Адрес — только проверенный блоком «ПК в сети» (ответил именно этот ПК),
     чтобы по устаревшей записи DNS не выключить чужой компьютер. -> (выключаются, не в сети, {имя: ошибка})."""
     computers = [c for c in computers if c["status"] != "decommissioned"]
     up, _at, error, _details = netmap.status(computers)
     if error:
         return [], [], {c["hostname"]: error for c in computers}
     offline = [c["hostname"] for c in computers if c["hostname"] not in up]
-    results = shutdown.shutdown_many([up[h]["ip"] for h in up], INSTANCE_DIR)
+    results = shutdown.shutdown_many([up[h]["ip"] for h in up], INSTANCE_DIR, reboot=reboot,
+                                     message=shutdown.REBOOT_MESSAGE if reboot else shutdown.MESSAGE)
+    action = "reboot" if reboot else "shutdown"
     started, failed = [], {}
     for host, info in up.items():
         ok, text = results[info["ip"]]
@@ -966,9 +968,9 @@ def shutdown_computers(computers):
             failed[host] = text
     who = (current_user()["username"] or "admin", request.remote_addr) if has_request_context() else ("cli", "-")
     if started:
-        app.logger.warning("shutdown: %s (by %s, ip=%s)", ", ".join(sorted(started)), *who)
+        app.logger.warning("%s: %s (by %s, ip=%s)", action, ", ".join(sorted(started)), *who)
     for host, text in failed.items():
-        app.logger.warning("shutdown failed: %s: %s", host, text)
+        app.logger.warning("%s failed: %s: %s", action, host, text)
     return sorted(started), offline, failed
 
 
@@ -997,6 +999,26 @@ def computer_shutdown(hostname):
     else:
         flash_shutdown(*shutdown_computers([pc]), pc["hostname"])
     return wake_redirect(url_for("computer", hostname=pc["hostname"]))
+
+
+@app.route("/computers/<hostname>/reboot", methods=["POST"])
+@admin_required
+def computer_reboot(hostname):
+    pc = get_computer_or_404(hostname)
+    host = pc["hostname"]
+    if not shutdown_account():
+        flash("Сначала задайте учётную запись для выключения — см. «Данные» → «Выключение ПК».", "warning")
+    elif pc["status"] == "decommissioned":
+        flash("Компьютер списан.", "warning")
+    else:
+        started, offline, failed = shutdown_computers([pc], reboot=True)
+        if started:
+            flash(f"{host}: перезагрузка запущена. Пользователь увидит предупреждение, через минуту ПК перезагрузится.", "success")
+        elif offline:
+            flash(f"{host}: перезагрузить нельзя — ПК не в сети.", "info")
+        else:
+            flash(f"{host}: не удалось перезагрузить — {failed.get(host)}.", "danger")
+    return redirect(url_for("computer", hostname=host))
 
 
 @app.route("/auditoriums/<code>/shutdown", methods=["POST"])

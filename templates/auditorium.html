@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import csrf, status_badge, delete_button, author_link %}
+{% from "icons.html" import icon %}
 {% block title %}{{ code }}{% endblock %}
 {% block content %}
 <nav class="crumbs"><a href="{{ url_for('auditoriums') }}">Аудитории</a> / {{ code }}</nav>
@@ -13,12 +14,12 @@
     {% if computers %}
     <form method="post" action="{{ url_for('auditorium_wake', code=code) }}" class="inline"
           data-confirm="Включить по Wake-on-LAN все компьютеры {{ code }}?">
-      {{ csrf() }}<button class="btn" title="Wake-on-LAN для всех ПК аудитории, кроме списанных">⏻ Включить все ПК</button>
+      {{ csrf() }}<button class="btn" title="Wake-on-LAN для всех ПК аудитории, кроме списанных">{{ icon('power', 16) }}Включить все ПК</button>
     </form>
     {% if shutdown_ready %}
     <form method="post" action="{{ url_for('auditorium_shutdown', code=code) }}" class="inline"
           data-confirm="Выключить все включённые компьютеры {{ code }}? Пользователи увидят предупреждение, через минуту ПК выключатся — несохранённая работа пропадёт.">
-      {{ csrf() }}<button class="btn btn-danger" title="Выключить все ПК аудитории, которые сейчас в сети">⏼ Выключить все ПК</button>
+      {{ csrf() }}<button class="btn btn-danger" title="Выключить все ПК аудитории, которые сейчас в сети">{{ icon('power', 16) }}Выключить все ПК</button>
     </form>
     {% endif %}
     {% endif %}

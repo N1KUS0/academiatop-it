@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import csrf, cat_badge, ticket_badge, kind_badge, author_link %}
+{% from "icons.html" import icon %}
 {% block title %}Главная{% endblock %}
 {% block content %}
 {% set shown = open_tickets[:6] %}
@@ -122,14 +123,14 @@
       <form method="post" action="{{ url_for('auditorium_wake', code='AUD-' ~ a.num) }}" class="inline"
             data-confirm="Включить по Wake-on-LAN все компьютеры AUD-{{ a.num }}?">
         {{ csrf() }}<input type="hidden" name="back" value="home">
-        <button class="btn btn-sm netmap-wake" title="Wake-on-LAN для всех ПК аудитории">⏻ Включить</button>
+        <button class="btn btn-sm netmap-wake" title="Wake-on-LAN для всех ПК аудитории">{{ icon('power', 14) }}Включить</button>
       </form>
       {% endif %}
       {% if shutdown_ready and computers|selectattr('auditorium_id', 'equalto', a.id)|list %}
       <form method="post" action="{{ url_for('auditorium_shutdown', code='AUD-' ~ a.num) }}" class="inline"
             data-confirm="Выключить все включённые компьютеры AUD-{{ a.num }}? Пользователи увидят предупреждение, через минуту ПК выключатся.">
         {{ csrf() }}<input type="hidden" name="back" value="home">
-        <button class="btn btn-sm btn-danger netmap-wake" title="Выключить все ПК аудитории, которые сейчас в сети">⏼ Выключить</button>
+        <button class="btn btn-sm btn-danger netmap-wake" title="Выключить все ПК аудитории, которые сейчас в сети">{{ icon('power', 14) }}Выключить</button>
       </form>
       {% endif %}
     </div>

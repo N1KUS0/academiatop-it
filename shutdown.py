@@ -14,6 +14,7 @@ AUTH_NAME = "shutdown.auth"
 DELAY = 60          # секунд до выключения: пользователь увидит предупреждение и успеет сохранить работу
 TIMEOUT = 20        # сколько ждать ответа ПК, секунд
 MESSAGE = "Компьютер будет выключен администратором через 1 минуту. Сохраните работу."
+REBOOT_MESSAGE = "Компьютер будет перезагружен администратором через 1 минуту. Сохраните работу."
 
 # Частые ошибки Samba -> понятный текст.
 ERRORS = [
@@ -104,12 +105,12 @@ def explain(output):
     return lines[-1][:200] if lines else "неизвестная ошибка"
 
 
-def shutdown(ip, instance_dir, delay=DELAY, message=MESSAGE):
-    """Выключить ПК по IP. -> (успех, текст ошибки или "")."""
+def shutdown(ip, instance_dir, delay=DELAY, message=MESSAGE, reboot=False):
+    """Выключить (reboot=True — перезагрузить) ПК по IP. -> (успех, текст ошибки или "")."""
     if not load_account(instance_dir):
         return False, "не задана учётная запись для выключения (см. страницу «Данные»)"
     cmd = ["net", "rpc", "shutdown", "-I", ip, "-A", auth_path(instance_dir), "-s", _smb_conf(instance_dir),
-           "-f", "-t", str(delay), "-C", message]
+           "-f", "-t", str(delay), "-C", message] + (["-r"] if reboot else [])
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=TIMEOUT)
     except FileNotFoundError:
@@ -124,11 +125,11 @@ def shutdown(ip, instance_dir, delay=DELAY, message=MESSAGE):
     return False, explain(out)
 
 
-def shutdown_many(ips, instance_dir, delay=DELAY, message=MESSAGE):
+def shutdown_many(ips, instance_dir, delay=DELAY, message=MESSAGE, reboot=False):
     """{ip: (успех, текст)} — параллельно, чтобы аудитория выключалась не дольше одного ПК."""
     ips = list(dict.fromkeys(ips))
     if not ips:
         return {}
     with ThreadPoolExecutor(max_workers=min(16, len(ips))) as pool:
-        results = pool.map(lambda ip: shutdown(ip, instance_dir, delay, message), ips)
+        results = pool.map(lambda ip: shutdown(ip, instance_dir, delay, message, reboot), ips)
     return dict(zip(ips, results))
