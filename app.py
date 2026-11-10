@@ -2158,7 +2158,7 @@ SELECT t.*, a.num AS aud_num, c.num AS pc_num, ta.num AS t_aud_num,
          WHERE tc.ticket_id = t.id) AS pc_list,
        (SELECT group_concat(tc.computer_id, ' ') FROM ticket_computers tc
          WHERE tc.ticket_id = t.id AND tc.computer_id IS NOT NULL) AS pc_ids,
-       (SELECT COUNT(*) FROM ticket_messages m WHERE m.ticket_id = t.id) AS msg_count,
+       (SELECT COUNT(*) FROM ticket_messages m WHERE m.ticket_id = t.id AND m.system = 0) AS msg_count,
        (SELECT COUNT(*) FROM ticket_watchers w WHERE w.ticket_id = t.id) AS watchers,
        me.user_id IS NOT NULL AS watching, COALESCE(me.unread, 0) AS my_unread,
        (SELECT av.version FROM user_avatars av WHERE av.user_id = t.author_id) AS author_avatar
@@ -2220,12 +2220,16 @@ def make_photo(data):
     return to_jpeg(big, 85), to_jpeg(small, 80)
 
 
-def read_photos():
+def read_photos(limit=None):
     """Фото из поля photos формы -> (список (фото, миниатюра), предупреждение или None).
-    Если с фото что-то не так, текст сообщения всё равно сохраняется — без фото, с предупреждением."""
+    Если с фото что-то не так, текст сообщения всё равно сохраняется — без фото, с предупреждением.
+    limit — сколько фото ещё можно добавить (при правке сообщения часть мест занята прежними фото)."""
     files = [f for f in request.files.getlist("photos") if f and f.filename]
     if not files:
         return [], None
+    if limit is not None and len(files) > limit:
+        return [], (f"Фото не добавлены: в сообщении может быть не больше {PHOTO_MAX_FILES} фото. "
+                    "Уберите лишние прежние или добавьте меньше новых.")
     if not pillow_available():
         app.logger.error("ticket photos: Pillow is not installed, run pip install -r requirements.txt")
         return [], "Фото не приложены: на сервере не установлена библиотека Pillow. Сообщите администратору."
@@ -2249,11 +2253,11 @@ def save_photos(conn, ticket_id, message_id, photos, stamp):
                      "VALUES (?, ?, ?, ?, ?)", [(ticket_id, message_id, big, small, stamp) for big, small in photos])
 
 
-def add_message(conn, ticket_id, user, body, stamp, status=""):
+def add_message(conn, ticket_id, user, body, stamp, status="", system=0):
     return conn.execute(
-        "INSERT INTO ticket_messages (ticket_id, author_id, author_name, is_admin, body, status, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (ticket_id, user["id"], user["name"], int(user["admin"]), body, status, stamp)).lastrowid
+        "INSERT INTO ticket_messages (ticket_id, author_id, author_name, is_admin, body, status, created_at, system) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (ticket_id, user["id"], user["name"], int(user["admin"]), body, status, stamp, system)).lastrowid
 
 
 @app.route("/tickets/photo/<int:photo_id>")
@@ -2397,6 +2401,32 @@ def tickets():
                            mine=mine)
 
 
+def resolve_ticket_place(pcs, auditorium_code):
+    """Отмеченные в форме ПК и аудитория -> (компьютеры, аудитория, текст ошибки или None)."""
+    computers = [find_computer(h) for h in pcs]
+    missing = [h for h, c in zip(pcs, computers) if not c]
+    aud = find_auditorium(auditorium_code)
+    if not aud and computers and not missing:
+        aud = get_db().execute("SELECT * FROM auditoriums WHERE id = ?", (computers[0]["auditorium_id"],)).fetchone()
+    if missing:
+        return computers, aud, f"Компьютер {missing[0]} не найден."
+    if auditorium_code and not aud:
+        return computers, aud, f"Аудитория {auditorium_code} не найдена."
+    if any(c["auditorium_id"] != aud["id"] for c in computers):
+        other = next(h for h, c in zip(pcs, computers) if c["auditorium_id"] != aud["id"])
+        return computers, aud, (f"Компьютер {other} не в аудитории {aud_code(aud['num'])}. "
+                                "В одной заявке — компьютеры одной аудитории.")
+    return computers, aud, None
+
+
+def ticket_place_values(pcs, computers, aud):
+    """Как место хранится в tickets: (computer_id, auditorium_id, hostname).
+    Один ПК — computer_id; несколько — аудитория + ticket_computers; ни одного — вся аудитория."""
+    single = computers[0] if len(computers) == 1 else None
+    return (single["id"] if single else None, aud["id"] if aud and not single else None,
+            pcs[0] if single else aud_code(aud["num"]) if aud else "")
+
+
 @app.route("/tickets/new", methods=["GET", "POST"])
 def ticket_new():
     user = current_user()
@@ -2413,21 +2443,11 @@ def ticket_new():
         form.update(title=form_str("title"), body=request.form.get("body", "").strip()[:TICKET_BODY_MAX],
                     software=form_str("software"), auditorium=form_str("auditorium", 20),
                     need_by=form_date("need_by") if form["kind"] == "install" else "")
-        computers = [find_computer(h) for h in pcs]
-        missing = [h for h, c in zip(pcs, computers) if not c]
-        aud = find_auditorium(form["auditorium"])
-        if not aud and computers and not missing:
-            aud = conn.execute("SELECT * FROM auditoriums WHERE id = ?", (computers[0]["auditorium_id"],)).fetchone()
+        computers, aud, place_error = resolve_ticket_place(pcs, form["auditorium"])
         if form["kind"] not in TICKET_KINDS:
             flash("Выберите тип заявки.", "danger")
-        elif missing:
-            flash(f"Компьютер {missing[0]} не найден.", "danger")
-        elif form["auditorium"] and not aud:
-            flash(f"Аудитория {form['auditorium']} не найдена.", "danger")
-        elif any(c["auditorium_id"] != aud["id"] for c in computers):
-            other = next(h for h, c in zip(pcs, computers) if c["auditorium_id"] != aud["id"])
-            flash(f"Компьютер {other} не в аудитории {aud_code(aud['num'])}. "
-                  "В одной заявке — компьютеры одной аудитории.", "danger")
+        elif place_error:
+            flash(place_error, "danger")
         elif form["kind"] == "install" and not form["software"]:
             flash("Укажите, какую программу установить.", "danger")
         elif form["need_by"] is None:
@@ -2441,15 +2461,12 @@ def ticket_new():
             if not form["title"]:
                 form["title"] = f"Установить {form['software']}"
             stamp = now_str()
-            # Один ПК — computer_id; несколько — аудитория + ticket_computers; ни одного — вся аудитория.
-            single = computers[0] if len(computers) == 1 else None
+            computer_id, auditorium_id, hostname = ticket_place_values(pcs, computers, aud)
             cur = conn.execute(
                 """INSERT INTO tickets (kind, title, computer_id, auditorium_id, hostname, software_name, need_by,
                                         author_id, author_username, author_name, created_at, updated_at, admin_unread)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (form["kind"], form["title"], single["id"] if single else None,
-                 aud["id"] if aud and not single else None,
-                 pcs[0] if single else aud_code(aud["num"]) if aud else "",
+                (form["kind"], form["title"], computer_id, auditorium_id, hostname,
                  form["software"] if form["kind"] == "install" else "", form["need_by"],
                  user["id"], user["username"], user["name"], stamp, stamp, 0 if user["admin"] else 1))
             if len(computers) > 1:
@@ -2486,17 +2503,7 @@ def ticket(ticket_id):
         conn.execute("UPDATE ticket_watchers SET unread = 0 WHERE ticket_id = ? AND user_id = ?",
                      (ticket_id, current_user()["id"]))
         conn.commit()
-    # Автор сообщения — по профилю: актуальное имя и аватарка (у старых сообщений без автора — имя как было).
-    messages = conn.execute(
-        """SELECT m.*, COALESCE(NULLIF(u.full_name, ''), u.username) AS author_now, av.version AS avatar
-           FROM ticket_messages m
-           LEFT JOIN users u ON u.id = m.author_id
-           LEFT JOIN user_avatars av ON av.user_id = m.author_id
-           WHERE m.ticket_id = ? ORDER BY m.id""", (ticket_id,)).fetchall()
-    photos = {}
-    for r in conn.execute("SELECT id, message_id FROM ticket_attachments WHERE ticket_id = ? ORDER BY id",
-                          (ticket_id,)):
-        photos.setdefault(r["message_id"], []).append(r["id"])
+    messages, photos = load_messages(conn, ticket_id)
     # Для заявки на установку: на скольких ПК программы ещё нет.
     targets = install_targets(t) if t["kind"] == "install" and t["software_name"] else []
     missing = 0
@@ -2522,10 +2529,185 @@ def ticket(ticket_id):
            WHERE id NOT IN (SELECT user_id FROM ticket_watchers WHERE ticket_id = ?)
            ORDER BY COALESCE(NULLIF(full_name, ''), username) COLLATE NOCASE""",
         (ticket_id,)).fetchall() if current_user()["admin"] else []
+    user = current_user()
+    can_edit, can_edit_text = ticket_edit_rights(t, user)
     return render_template("ticket.html", t=t, messages=messages, photos=photos, similar=similar, pc_rows=pc_rows,
                            watchers=watchers, candidates=candidates, photo_max=PHOTO_MAX_FILES,
+                           can_edit=can_edit, can_edit_text=can_edit_text,
+                           edit_form=ticket_edit_form(t) if can_edit else None,
+                           computers=list_computers() if can_edit else [],
+                           auditoriums=list_auditoriums() if can_edit else [],
+                           sw_names=software_names() if can_edit and t["kind"] == "install" else [],
+                           editable={m["id"] for m in messages if can_edit_message(m, t, user)},
                            install_total=len(targets), install_missing=missing,
                            can_write=t["is_open"] or current_user()["admin"] or bool(t["watching"]))
+
+
+# --------------------------------------------------------------------------- правка заявок и сообщений
+
+def ticket_edit_rights(t, user):
+    """Кто что может менять в заявке -> (данные: аудитория, ПК, программа, срок; текст: тема).
+    Автор — всё, пока заявка открыта. Администратор — данные в любой заявке, а текст только в своей:
+    написанное пользователем он не правит."""
+    if user["admin"]:
+        return True, t["author_id"] is None and t["author_username"] == user["username"]
+    own = bool(t["is_author"] and t["is_open"])
+    return own, own
+
+
+def can_edit_message(m, t, user):
+    """Своё сообщение можно править: пользователю — пока заявка открыта, администратору — свои ответы."""
+    if m["system"]:
+        return False
+    if user["admin"]:
+        return bool(m["is_admin"])
+    return not m["is_admin"] and m["author_id"] is not None and m["author_id"] == user["id"] and t["is_open"]
+
+
+def ticket_place_text(t):
+    if t["pcs"]:
+        return ", ".join(t["pcs"])
+    if t["pc_link"]:
+        return t["pc_link"]
+    if t["aud_link"]:
+        return f"{t['aud_link']} (вся аудитория)"
+    return t["hostname"] or "не указано"
+
+
+def ticket_changes(old, new):
+    """Что изменилось в заявке — строки для служебной записи в переписке."""
+    changes = []
+    if old["title"] != new["title"]:
+        changes.append(f"тема: «{old['title']}» → «{new['title']}»")
+    if ticket_place_text(old) != ticket_place_text(new):
+        changes.append(f"где: {ticket_place_text(old)} → {ticket_place_text(new)}")
+    if old["software_name"] != new["software_name"]:
+        changes.append(f"программа: {old['software_name'] or 'не указана'} → {new['software_name'] or 'не указана'}")
+    if old["need_by"] != new["need_by"]:
+        changes.append("срок: " + " → ".join(ru_date(x["need_by"]) if x["need_by"] else "не указан" for x in (old, new)))
+    return changes
+
+
+def load_messages(conn, ticket_id, msg_id=None):
+    """Сообщения заявки (или одно) и их фото -> (строки, {id сообщения: [id фото]}).
+    Автор — по профилю: актуальное имя и аватарка (у старых сообщений без автора — имя как было)."""
+    only = " AND m.id = ?" if msg_id else ""
+    args = (ticket_id, msg_id) if msg_id else (ticket_id,)
+    messages = conn.execute(
+        """SELECT m.*, COALESCE(NULLIF(u.full_name, ''), u.username) AS author_now, av.version AS avatar
+           FROM ticket_messages m
+           LEFT JOIN users u ON u.id = m.author_id
+           LEFT JOIN user_avatars av ON av.user_id = m.author_id
+           WHERE m.ticket_id = ?""" + only + " ORDER BY m.id", args).fetchall()
+    photos = {}
+    for r in conn.execute("SELECT id, message_id FROM ticket_attachments WHERE ticket_id = ? ORDER BY id",
+                          (ticket_id,)):
+        photos.setdefault(r["message_id"], []).append(r["id"])
+    return messages, photos
+
+
+def ticket_edit_form(t):
+    """Текущие значения заявки для формы правки."""
+    return dict(pcs=[h for h in ([t["pc_link"]] if t["pc_link"] else t["pcs"]) if find_computer(h)],
+                title=t["title"], software=t["software_name"], need_by=t["need_by"],
+                auditorium=t["aud_link"] or (aud_code(t["aud_num"]) if t["aud_num"] else ""))
+
+
+def edit_error(text, code=400):
+    return jsonify(ok=False, error=text), code
+
+
+@app.route("/tickets/<int:ticket_id>/edit", methods=["POST"])
+def ticket_edit(ticket_id):
+    """Правка заявки со страницы заявки (ответ — JSON). Тип не меняется; текст и фото — это сообщение в переписке."""
+    t = get_ticket_or_404(ticket_id)
+    user = current_user()
+    can_data, can_text = ticket_edit_rights(t, user)
+    if not can_data:
+        return edit_error("Заявку может изменить её автор, пока она открыта, или администратор.", 403)
+    conn = get_db()
+    install = t["kind"] == "install"
+    pcs = list(dict.fromkeys(h.strip().upper() for h in request.form.getlist("pc") if h.strip()))[:MAX_TICKET_PCS]
+    title = form_str("title") if can_text else t["title"]
+    software = form_str("software") if install else ""
+    need_by = form_date("need_by") if install else ""
+    computers, aud, place_error = resolve_ticket_place(pcs, form_str("auditorium", 20))
+    if place_error:
+        return edit_error(place_error)
+    if install and not software:
+        return edit_error("Укажите, какую программу установить.")
+    if need_by is None:
+        return edit_error("Неверная дата в поле «Нужно к».")
+    if need_by and need_by != t["need_by"] and need_by < date.today().isoformat():
+        return edit_error("Дата в поле «Нужно к» уже прошла.")
+    if not install and not title:
+        return edit_error("Кратко опишите проблему в поле «Тема».")
+    # Тема заявки на установку, составленная сама («Установить X»), следует за программой.
+    if install and (not title or title == f"Установить {t['software_name']}"):
+        title = f"Установить {software}"
+    computer_id, auditorium_id, hostname = ticket_place_values(pcs, computers, aud)
+    conn.execute("UPDATE tickets SET title = ?, computer_id = ?, auditorium_id = ?, hostname = ?, "
+                 "software_name = ?, need_by = ? WHERE id = ?",
+                 (title, computer_id, auditorium_id, hostname, software, need_by, ticket_id))
+    conn.execute("DELETE FROM ticket_computers WHERE ticket_id = ?", (ticket_id,))
+    if len(computers) > 1:
+        conn.executemany("INSERT INTO ticket_computers (ticket_id, computer_id, hostname) VALUES (?, ?, ?)",
+                         [(ticket_id, c["id"], h) for h, c in zip(pcs, computers)])
+    new = get_ticket_or_404(ticket_id)
+    changes = ticket_changes(t, new)
+    if not changes:
+        conn.rollback()
+        return jsonify(ok=True, changed=False)
+    stamp = now_str()
+    note = "; ".join(changes)
+    add_message(conn, ticket_id, user, note, stamp, system=1)  # что именно поменяли — видно в переписке
+    conn.execute("UPDATE tickets SET edited_at = ?, edited_by = ?, updated_at = ? WHERE id = ?",
+                 (stamp, user["name"], stamp, ticket_id))
+    if not user["admin"]:
+        conn.execute("UPDATE tickets SET admin_unread = 1 WHERE id = ?", (ticket_id,))
+    mark_watchers_unread(conn, ticket_id, except_user=user["id"])
+    conn.commit()
+    app.logger.warning("ticket #%s edited by %s: %s", ticket_id, user["username"], note)
+    if not user["admin"]:
+        notify_admin(tg_ticket_text("✏️", new, user["name"], "Изменения: " + note))
+    return jsonify(ok=True, changed=True)
+
+
+@app.route("/tickets/messages/<int:msg_id>/edit", methods=["POST"])
+def ticket_message_edit(msg_id):
+    """Правка своего сообщения на месте: текст, убрать и добавить фото. Ответ — JSON с новой разметкой сообщения."""
+    conn = get_db()
+    m = conn.execute("SELECT * FROM ticket_messages WHERE id = ?", (msg_id,)).fetchone()
+    if not m:
+        abort(404)
+    t = get_ticket_or_404(m["ticket_id"])
+    user = current_user()
+    if not can_edit_message(m, t, user):
+        return edit_error("Это сообщение изменить нельзя.", 403)
+    photo_ids = [r["id"] for r in conn.execute("SELECT id FROM ticket_attachments WHERE message_id = ? ORDER BY id",
+                                               (msg_id,))]
+    body = request.form.get("body", "").strip()[:TICKET_BODY_MAX]
+    remove = {int(x) for x in request.form.getlist("remove") if x.isdigit()} & set(photo_ids)
+    kept = len(photo_ids) - len(remove)
+    new_photos, photo_error = read_photos(limit=PHOTO_MAX_FILES - kept)
+    if photo_error:
+        return edit_error(photo_error)
+    if not body and not m["status"] and kept + len(new_photos) == 0:
+        return edit_error("Сообщение не может стать пустым: оставьте текст или фото.")
+    if body != m["body"] or remove or new_photos:
+        stamp = now_str()
+        conn.execute("UPDATE ticket_messages SET body = ?, edited_at = ? WHERE id = ?", (body, stamp, msg_id))
+        conn.executemany("DELETE FROM ticket_attachments WHERE id = ? AND message_id = ?",
+                         [(pid, msg_id) for pid in remove])
+        save_photos(conn, t["id"], msg_id, new_photos, stamp)
+        conn.execute("UPDATE tickets SET updated_at = ? WHERE id = ?", (stamp, t["id"]))
+        if not user["admin"]:
+            conn.execute("UPDATE tickets SET admin_unread = 1 WHERE id = ?", (t["id"],))
+        mark_watchers_unread(conn, t["id"], except_user=user["id"])
+        conn.commit()
+    messages, photos = load_messages(conn, t["id"], msg_id)
+    return jsonify(ok=True, html=render_template("_ticket_message.html", m=messages[0], photos=photos,
+                                                 editable={msg_id}, photo_max=PHOTO_MAX_FILES))
 
 
 @app.route("/tickets/<int:ticket_id>/reply", methods=["POST"])

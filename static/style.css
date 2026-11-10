@@ -593,9 +593,11 @@ form.inline { display: inline; margin: 0; }
 .photo-thumb { position: relative; display: block; }
 .photo-thumb img { display: block; width: 120px; height: 90px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); cursor: zoom-in; }
 .photo-thumb button {
-  position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%;
-  border: 0; background: var(--ink); color: var(--card); font-size: 15px; line-height: 22px; padding: 0; cursor: pointer;
+  position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border-radius: 6px; border: 0; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .55); color: #fff; cursor: pointer;
 }
+.photo-thumb button:hover { background: var(--bad); color: #fff; }
 form.drop-target { outline: 2px dashed var(--accent); outline-offset: 4px; }
 
 /* ---------- карта ПК в сети ---------- */
@@ -701,3 +703,27 @@ p.wake-failed { margin: 10px 0 0; color: var(--bad-text); }
   .lightbox img { max-width: 100vw; max-height: calc(100vh - 140px); border-radius: 0; }
   .lb-prev, .lb-next { top: auto; bottom: 56px; transform: none; }
 }
+
+/* ---------- правка заявок и сообщений ---------- */
+.msg-meta { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.msg-edited { display: inline-flex; align-items: center; gap: 4px; }
+.msg-edit { display: inline-flex; padding: 4px; margin: -4px; border: 0; background: none; border-radius: 6px; color: var(--muted); cursor: pointer; }
+.msg-edit:hover { background: var(--chip); color: var(--accent-dark); }
+.msg-note { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 2px 4px; max-width: 760px; }
+.msg-note .icon { flex: none; align-self: center; }
+.msg-note > span:first-of-type { flex: 1 1 260px; overflow-wrap: anywhere; }
+.specs dd .icon, .btn .icon { vertical-align: -2px; }
+.msg-edit-form { display: none; flex-direction: column; gap: 8px; }
+.msg.editing .msg-edit-form { display: flex; }
+.msg.editing .msg-view, .msg.editing .msg-edit { display: none; }
+.msg-edit-form textarea { resize: vertical; }
+.edit-photos { display: flex; flex-wrap: wrap; gap: 8px; }
+.edit-photos:empty { display: none; }
+.edit-photos .photo-preview { display: contents; }
+.edit-photos .photo-preview-head { display: none; }
+.msg-edit-form .photo-thumb img { width: 96px; height: 72px; }
+.msg-edit-bar { display: flex; align-items: center; gap: 6px; }
+.msg-edit-bar .btn-link { margin-left: auto; }
+.icon-btn { display: inline-flex; flex-direction: row; padding: 6px; border-radius: 6px; color: var(--muted); cursor: pointer; }
+.icon-btn:hover { background: var(--chip); color: var(--ink); }
+.form-error { margin: 0; color: var(--bad); font-size: 13px; }

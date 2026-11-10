@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import csrf %}
+{% from "macros.html" import csrf, ticket_place_fields %}
 {% block title %}Новая заявка{% endblock %}
 {% block content %}
 <nav class="crumbs"><a href="{{ url_for('tickets') }}">Заявки</a> / новая</nav>
@@ -13,33 +13,7 @@
     {% endfor %}
   </div>
 
-  <label>Аудитория
-    <select name="auditorium" id="ticket-aud">
-      <option value="">— не указана —</option>
-      {% for a in auditoriums %}{% set code = 'AUD-' ~ a.num %}
-      <option value="{{ code }}" {{ 'selected' if form.auditorium|upper == code }}>{{ code }}{% if a.note %} · {{ a.note }}{% endif %}</option>
-      {% endfor %}
-    </select>
-  </label>
-
-  <fieldset class="wide pc-picker" id="pc-picker">
-    <legend>Компьютеры <span class="muted small" id="pc-picker-hint">не отмечено ни одного — заявка на всю аудиторию</span></legend>
-    {% for a in auditoriums %}
-    <div class="pc-group" data-aud="AUD-{{ a.num }}">
-      <div class="pc-group-head small muted">AUD-{{ a.num }}
-        {%- set aud_pcs = computers|selectattr('aud_num', 'equalto', a.num)|list %}
-        {%- if aud_pcs|length > 1 %} · <button type="button" class="link-btn" data-pc-all>отметить все</button>{% endif %}</div>
-      {% for c in aud_pcs %}
-      <label class="check pc-chip{{ ' pc-off' if c.status != 'active' }}" title="{{ STATUSES.get(c.status, '') }}">
-        <input type="checkbox" name="pc" value="{{ c.hostname }}" {{ 'checked' if c.hostname in form.pcs }}>
-        <span class="mono">{{ c.hostname }}</span></label>
-      {% else %}
-      <span class="muted small">В аудитории нет компьютеров.</span>
-      {% endfor %}
-    </div>
-    {% endfor %}
-    <p class="muted small pc-picker-empty">Сначала выберите аудиторию.</p>
-  </fieldset>
+  {{ ticket_place_fields(auditoriums, computers, form) }}
 
   <label data-kind="install">Какую программу установить
     <input type="text" name="software" list="sw-names" value="{{ form.software }}" placeholder="название программы" autocomplete="off">

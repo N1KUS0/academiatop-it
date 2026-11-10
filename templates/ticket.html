@@ -1,13 +1,45 @@
 {% extends "base.html" %}
-{% from "macros.html" import csrf, delete_button, ticket_badge, kind_badge, author_link, avatar %}
+{% from "macros.html" import csrf, delete_button, ticket_badge, kind_badge, author_link, avatar, ticket_place_fields %}
+{% from "icons.html" import icon %}
 {% block title %}Заявка №{{ t.id }}{% endblock %}
 {% block content %}
 <nav class="crumbs"><a href="{{ url_for('tickets') }}">Заявки</a> / №{{ t.id }}</nav>
 <div class="page-head">
   <h1>{{ t.title }} {{ ticket_badge(t.status) }}</h1>
+  {% if can_edit %}
+  <button type="button" class="btn btn-link btn-sm" data-ticket-edit>{{ icon('pencil', 16) }} Изменить</button>
+  {% endif %}
 </div>
 
-<dl class="card specs">
+{% if can_edit %}
+{# Правка заявки — здесь же, вместо карточки с данными. Текст и фото правятся у самого сообщения. #}
+<form method="post" action="{{ url_for('ticket_edit', ticket_id=t.id) }}" class="card form-grid" id="ticket-form" hidden>
+  {{ csrf() }}
+  {% if can_edit_text %}
+  <label class="wide">Тема
+    <input type="text" name="title" value="{{ edit_form.title }}" maxlength="200">
+  </label>
+  {% endif %}
+  {{ ticket_place_fields(auditoriums, computers, edit_form) }}
+  {% if t.kind == 'install' %}
+  <label>Какую программу установить
+    <input type="text" name="software" list="sw-names" value="{{ edit_form.software }}" autocomplete="off">
+  </label>
+  <label>Нужно к
+    {# Прежний срок мог уже пройти — тогда не мешаем сохранить остальное. #}
+    <input type="date" name="need_by" value="{{ edit_form.need_by or '' }}" {% if not (edit_form.need_by and edit_form.need_by < today) %}min="{{ today }}"{% endif %}>
+  </label>
+  <datalist id="sw-names">{% for n in sw_names %}<option value="{{ n }}">{% endfor %}</datalist>
+  {% endif %}
+  <p class="wide form-error" hidden></p>
+  <div class="wide form-actions">
+    <button class="btn btn-primary">Сохранить</button>
+    <button type="button" class="btn btn-link" data-ticket-cancel>Отмена</button>
+  </div>
+</form>
+{% endif %}
+
+<dl class="card specs ticket-specs">
   <div><dt>Номер</dt><dd>№{{ t.id }}</dd></div>
   <div><dt>Тип</dt><dd>{{ kind_badge(t.kind) }}</dd></div>
   <div><dt>Где</dt><dd>
@@ -25,6 +57,8 @@
     <span class="muted small">{{ t.need_by | ru_date }}</span></dd></div>{% endif %}
   <div><dt>Автор</dt><dd>{{ author_link(t, with_avatar=True, size=24) }}</dd></div>
   <div><dt>Создана</dt><dd>{{ t.created_at }}</dd></div>
+  {% if t.edited_at %}<div><dt>Изменена</dt><dd>{{ icon('pencil', 14) }} {{ t.edited_at }}
+    <span class="muted small">{{ t.edited_by }}</span></dd></div>{% endif %}
   <div><dt>Касается</dt><dd>{{ t.watchers }} польз.</dd></div>
 </dl>
 
@@ -114,29 +148,11 @@
 <h2>Переписка</h2>
 <div class="thread">
   {% for m in messages %}
-  <div class="msg {{ 'msg-admin' if m.is_admin }}" {% if loop.last %}id="last"{% endif %}>
-    <div class="msg-head">
-      {% set name = m.author_now or m.author_name %}
-      {{ avatar(m.author_id if m.author_now else None, m.avatar, name, 28) }}
-      {% if m.author_now %}<a href="{{ url_for('user_profile', user_id=m.author_id) }}" class="strong">{{ name }}</a>
-      {%- else %}<b>{{ name }}</b>{% endif %}
-      {%- if m.is_admin %} <span class="muted small">администратор</span>{% endif %}
-      <span class="muted small">{{ m.created_at }}</span>
-    </div>
-    {% if m.body %}<div class="msg-body">{{ m.body }}</div>{% endif %}
-    {% if photos.get(m.id) %}
-    <div class="msg-photos">
-      {% for pid in photos[m.id] %}
-      <a href="{{ url_for('ticket_photo', photo_id=pid) }}" target="_blank" rel="noopener" title="Открыть полностью">
-        <img src="{{ url_for('ticket_photo', photo_id=pid, thumb=1) }}" alt="Фото к заявке" loading="lazy"></a>
-      {% endfor %}
-    </div>
-    {% endif %}
-    {% if m.status %}<div class="msg-status small">Статус: {{ ticket_badge(m.status) }}</div>{% endif %}
-  </div>
+  {% include "_ticket_message.html" %}
   {% else %}
   <p class="muted">Сообщений пока нет.</p>
   {% endfor %}
+  <span id="last"></span>
 </div>
 
 {% if not can_write %}

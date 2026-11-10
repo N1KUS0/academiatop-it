@@ -134,6 +134,8 @@ CREATE TABLE IF NOT EXISTS tickets (
     hostname        TEXT NOT NULL DEFAULT '',          -- имя ПК или аудитории на момент создания (если удалят)
     software_name   TEXT NOT NULL DEFAULT '',
     need_by         TEXT NOT NULL DEFAULT '',          -- установка: к какой дате нужно (ISO), пусто — не важно
+    edited_at       TEXT NOT NULL DEFAULT '',          -- когда заявку меняли (тему, место, программу, срок)
+    edited_by       TEXT NOT NULL DEFAULT '',          -- кто менял последним
     author_id       INTEGER,                           -- users.id; NULL — администратор или удалённый пользователь
     author_username TEXT NOT NULL DEFAULT '',
     author_name     TEXT NOT NULL DEFAULT '',
@@ -162,7 +164,9 @@ CREATE TABLE IF NOT EXISTS ticket_messages (
     is_admin    INTEGER NOT NULL DEFAULT 0,
     body        TEXT NOT NULL DEFAULT '',
     status      TEXT NOT NULL DEFAULT '',   -- новый статус, если сообщение его меняло
-    created_at  TEXT NOT NULL
+    created_at  TEXT NOT NULL,
+    edited_at   TEXT NOT NULL DEFAULT '',   -- когда автор менял текст или фото
+    system      INTEGER NOT NULL DEFAULT 0  -- 1 — служебная строка «изменения в заявке», её не редактируют
 );
 CREATE INDEX IF NOT EXISTS ticket_messages_ticket ON ticket_messages (ticket_id);
 
@@ -287,7 +291,13 @@ def migrate(conn):
                      "REFERENCES auditoriums(id) ON DELETE SET NULL")
     if "need_by" not in cols:
         conn.execute("ALTER TABLE tickets ADD COLUMN need_by TEXT NOT NULL DEFAULT ''")
+    if "edited_at" not in cols:
+        conn.execute("ALTER TABLE tickets ADD COLUMN edited_at TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE tickets ADD COLUMN edited_by TEXT NOT NULL DEFAULT ''")
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(ticket_messages)")}
+    if "edited_at" not in cols:
+        conn.execute("ALTER TABLE ticket_messages ADD COLUMN edited_at TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE ticket_messages ADD COLUMN system INTEGER NOT NULL DEFAULT 0")
     if "author_id" not in cols:
         conn.execute("ALTER TABLE ticket_messages ADD COLUMN author_id INTEGER")
         # Старые сообщения: автор по имени, если оно однозначно совпадает с одним пользователем.

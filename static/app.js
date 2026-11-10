@@ -311,9 +311,15 @@ document.addEventListener("click", function (e) {
 // Фото к заявке и ответу: выбрать файлом, вставить из буфера (Ctrl+V) или перетащить в форму.
 // Выбранные фото видны миниатюрами, лишнее можно убрать. Слишком много или слишком большие — сразу
 // предупредить (сервер всё равно проверит, но большой запрос nginx отклонит целиком, без понятного сообщения).
-document.querySelectorAll('input[type=file][name="photos"]').forEach(function (input) {
+var TRASH_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/>' +
+  '<path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="m19 6-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>' +
+  '<path d="M10 11v6M14 11v6"/></svg>';
+
+function initPhotoInput(input) {
   var MAX_FILE = 10 * 1024 * 1024, MAX_TOTAL = 18 * 1024 * 1024;
-  var max = parseInt(input.dataset.maxFiles, 10) || 3;
+  // При правке сообщения число меняется: часть мест занята прежними фото.
+  function maxFiles() { var n = parseInt(input.dataset.maxFiles, 10); return isNaN(n) ? 3 : n; }
   var form = input.form;
   var label = input.closest("label");
   var files = [];
@@ -325,13 +331,15 @@ document.querySelectorAll('input[type=file][name="photos"]').forEach(function (i
   preview.className = "photo-preview";
   var textarea = form && form.querySelector("textarea");
   var anchor = textarea ? (textarea.closest("label") || textarea) : (label || input);
-  anchor.insertAdjacentElement("afterend", preview);
+  var inside = input.dataset.previewIn && form.querySelector(input.dataset.previewIn);  // рядом с прежними фото
+  if (inside) inside.appendChild(preview); else anchor.insertAdjacentElement("afterend", preview);
   var urls = [];
 
   function check(list) {
     var total = list.reduce(function (s, f) { return s + f.size; }, 0);
     var big = list.filter(function (f) { return f.size > MAX_FILE; })[0];
-    return list.length > max ? "Можно приложить не больше " + max + " фото."
+    var max = maxFiles();
+    return list.length > max ? (max > 0 ? "Можно приложить не больше " + max + " фото." : "Больше фото добавить нельзя — сначала уберите лишние.")
       : big ? "Фото «" + big.name + "» больше 10 МБ."
       : total > MAX_TOTAL ? "Фото вместе больше 18 МБ — выберите меньше или поменьше."
       : "";
@@ -358,7 +366,7 @@ document.querySelectorAll('input[type=file][name="photos"]').forEach(function (i
     if (files.length) {
       var head = document.createElement("div");
       head.className = "photo-preview-head small muted";
-      head.textContent = "Приложено фото: " + files.length + " из " + max + " — нажмите, чтобы посмотреть";
+      head.textContent = "Приложено фото: " + files.length + " из " + maxFiles() + " — нажмите, чтобы посмотреть";
       preview.appendChild(head);
     }
     files.forEach(function (f, i) {
@@ -374,8 +382,9 @@ document.querySelectorAll('input[type=file][name="photos"]').forEach(function (i
       });
       var del = document.createElement("button");
       del.type = "button";
-      del.textContent = "×";
+      del.innerHTML = TRASH_ICON;
       del.title = "Убрать фото";
+      del.setAttribute("aria-label", "Убрать фото");
       del.addEventListener("click", function () {
         apply(files.filter(function (_, j) { return j !== i; }));
       });
@@ -394,6 +403,7 @@ document.querySelectorAll('input[type=file][name="photos"]').forEach(function (i
       });
   }
 
+  input.addEventListener("photos:reset", function () { apply([]); });
   input.addEventListener("change", function () {
     if (!canSet) {  // старый браузер: работает только обычный выбор файлов
       var error = check(Array.prototype.slice.call(input.files));
@@ -430,7 +440,107 @@ document.querySelectorAll('input[type=file][name="photos"]').forEach(function (i
     e.preventDefault();
     add(dropped);
   });
-});
+}
+document.querySelectorAll('input[type=file][name="photos"]').forEach(initPhotoInput);
+
+// Отправка формы правки без перехода: ответ — JSON, ошибка показывается в самой форме.
+function sendEdit(form, done) {
+  var save = form.querySelector(".btn-primary"), error = form.querySelector(".form-error");
+  save.disabled = true;
+  error.hidden = true;
+  fetch(form.action, { method: "POST", body: new FormData(form), credentials: "same-origin", headers: { Accept: "application/json" } })
+    .then(function (r) { return r.json().catch(function () { return null; }); })
+    .catch(function () { return null; })
+    .then(function (data) {
+      save.disabled = false;
+      if (data && data.ok) { done(data); return; }
+      error.textContent = (data && data.error) || "Не удалось сохранить. Обновите страницу и попробуйте ещё раз.";
+      error.hidden = false;
+    });
+}
+
+// Правка сообщения на месте: карандаш — редактор вместо текста, корзина на фото, Ctrl+Enter — сохранить, Esc — отмена.
+(function () {
+  var thread = document.querySelector(".thread");
+  if (!thread) return;
+  function updateLimit(form) {
+    var input = form.querySelector('input[name="photos"]');
+    input.dataset.maxFiles = input.dataset.total - form.querySelectorAll(".edit-photos [data-photo]:not([hidden])").length;
+  }
+  function closeEditor(msg) {
+    var form = msg.querySelector(".msg-edit-form");
+    form.reset();
+    form.querySelectorAll('input[name="remove"]').forEach(function (i) { i.remove(); });
+    form.querySelectorAll("[data-photo]").forEach(function (p) { p.hidden = false; });
+    form.querySelector(".form-error").hidden = true;
+    updateLimit(form);
+    form.querySelector('input[name="photos"]').dispatchEvent(new Event("photos:reset"));
+    msg.classList.remove("editing");
+  }
+  function openEditor(msg) {
+    msg.classList.add("editing");
+    var ta = msg.querySelector(".msg-edit-form textarea");
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+  thread.addEventListener("click", function (e) {
+    var t = e.target, msg = t.closest && t.closest(".msg");
+    if (!msg) return;
+    if (t.closest("[data-msg-edit]")) { openEditor(msg); return; }
+    if (t.closest("[data-msg-cancel]")) { closeEditor(msg); return; }
+    var remove = t.closest("[data-photo-remove]");
+    if (remove) {
+      var item = remove.closest("[data-photo]"), form = msg.querySelector(".msg-edit-form");
+      var field = document.createElement("input");
+      field.type = "hidden"; field.name = "remove"; field.value = item.dataset.photo;
+      form.appendChild(field);
+      item.hidden = true;
+      updateLimit(form);
+      return;
+    }
+    if (t.matches("[data-photo] img") && window.HTMLDialogElement) {
+      var imgs = Array.prototype.slice.call(msg.querySelectorAll(".edit-photos [data-photo]:not([hidden]) img"));
+      openLightbox(imgs.map(function (i) { return { src: i.dataset.full, href: i.dataset.full }; }), imgs.indexOf(t));
+    }
+  });
+  thread.addEventListener("keydown", function (e) {
+    if (!e.target.matches(".msg-edit-form textarea")) return;
+    var msg = e.target.closest(".msg");
+    if (e.key === "Escape") closeEditor(msg);
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); msg.querySelector(".msg-edit-form").requestSubmit(); }
+  });
+  thread.addEventListener("submit", function (e) {
+    if (!e.target.matches(".msg-edit-form")) return;
+    e.preventDefault();
+    var form = e.target, msg = form.closest(".msg");
+    sendEdit(form, function (data) {
+      var box = document.createElement("div");
+      box.innerHTML = data.html;
+      var fresh = box.firstElementChild;
+      msg.replaceWith(fresh);
+      fresh.querySelectorAll('input[type=file][name="photos"]').forEach(initPhotoInput);
+    });
+  });
+})();
+
+// Правка заявки на её странице: форма раскрывается вместо карточки с данными.
+(function () {
+  var btn = document.querySelector("[data-ticket-edit]"), form = document.getElementById("ticket-form");
+  if (!btn || !form) return;
+  var specs = document.querySelector(".ticket-specs");
+  function toggle(open) { form.hidden = !open; specs.hidden = open; btn.hidden = open; }
+  btn.addEventListener("click", function () { toggle(true); });
+  form.querySelector("[data-ticket-cancel]").addEventListener("click", function () {
+    form.reset();
+    form.querySelector(".form-error").hidden = true;
+    document.getElementById("ticket-aud").dispatchEvent(new Event("change"));
+    toggle(false);
+  });
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    sendEdit(form, function (data) { if (data.changed) location.reload(); else toggle(false); });
+  });
+})();
 
 // Кнопка «глазик» у полей пароля: показать введённое, чтобы не ошибиться
 document.querySelectorAll('input[type="password"]').forEach(function (input) {

@@ -1,0 +1,58 @@
+{# Одно сообщение переписки. Нужны: m, photos, editable, photo_max. Правка — здесь же, разметка заменяется целиком после сохранения. #}
+{% from "macros.html" import csrf, ticket_badge, avatar %}
+{% from "icons.html" import icon %}
+{% set name = m.author_now or m.author_name %}
+{% if m.system %}
+<div class="msg-note small muted" id="msg-{{ m.id }}">
+  {{ icon('pencil', 14) }}
+  <span><b>{{ name }}</b> · изменения в заявке: {{ m.body }}</span>
+  <span class="nowrap">{{ m.created_at }}</span>
+</div>
+{% else %}
+<div class="msg {{ 'msg-admin' if m.is_admin }}" id="msg-{{ m.id }}">
+  <div class="msg-head">
+    {{ avatar(m.author_id if m.author_now else None, m.avatar, name, 28) }}
+    {% if m.author_now %}<a href="{{ url_for('user_profile', user_id=m.author_id) }}" class="strong">{{ name }}</a>
+    {%- else %}<b>{{ name }}</b>{% endif %}
+    {%- if m.is_admin %} <span class="muted small">администратор</span>{% endif %}
+    <span class="muted small msg-meta">
+      <span>{{ m.created_at }}</span>
+      {% if m.edited_at %}<span class="msg-edited" title="Изменено {{ m.edited_at }}">{{ icon('pencil', 13) }} изменено</span>{% endif %}
+      {% if m.id in editable %}<button type="button" class="msg-edit" data-msg-edit title="Изменить" aria-label="Изменить сообщение">{{ icon('pencil', 16) }}</button>{% endif %}
+    </span>
+  </div>
+  <div class="msg-view">
+    {% if m.body %}<div class="msg-body">{{ m.body }}</div>{% endif %}
+    {% if photos.get(m.id) %}
+    <div class="msg-photos">
+      {% for pid in photos[m.id] %}
+      <a href="{{ url_for('ticket_photo', photo_id=pid) }}" target="_blank" rel="noopener" title="Открыть полностью">
+        <img src="{{ url_for('ticket_photo', photo_id=pid, thumb=1) }}" alt="Фото к заявке" loading="lazy"></a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% if m.id in editable %}
+  {% set own_photos = photos.get(m.id, []) %}
+  <form method="post" action="{{ url_for('ticket_message_edit', msg_id=m.id) }}" class="msg-edit-form" enctype="multipart/form-data">
+    {{ csrf() }}
+    <textarea name="body" rows="3" maxlength="5000" placeholder="Текст сообщения. Картинку можно вставить через Ctrl+V">{{ m.body }}</textarea>
+    <div class="edit-photos">
+      {%- for pid in own_photos %}<span class="photo-thumb" data-photo="{{ pid }}">
+        <img src="{{ url_for('ticket_photo', photo_id=pid, thumb=1) }}" data-full="{{ url_for('ticket_photo', photo_id=pid) }}" alt="Фото к заявке">
+        <button type="button" data-photo-remove title="Убрать фото" aria-label="Убрать фото">{{ icon('trash', 14) }}</button></span>
+      {%- endfor -%}
+    </div>
+    <p class="form-error" hidden></p>
+    <div class="msg-edit-bar">
+      <label class="icon-btn" title="Добавить фото (или вставьте Ctrl+V)">{{ icon('image', 18) }}
+        <input type="file" name="photos" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden
+               data-max-files="{{ photo_max - own_photos|length }}" data-total="{{ photo_max }}" data-preview-in=".edit-photos"></label>
+      <button type="button" class="btn btn-sm btn-link" data-msg-cancel>Отмена</button>
+      <button class="btn btn-sm btn-primary">Сохранить</button>
+    </div>
+  </form>
+  {% endif %}
+  {% if m.status %}<div class="msg-status small">Статус: {{ ticket_badge(m.status) }}</div>{% endif %}
+</div>
+{% endif %}
