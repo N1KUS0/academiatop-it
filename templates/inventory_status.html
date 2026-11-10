@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "macros.html" import status_badge %}
+{% block title %}Выгрузка с ПК{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Выгрузка с ПК</h1>
+  <div class="actions"><a class="btn" href="{{ url_for('import_page') }}">Импорт</a></div>
+</div>
+<p class="muted small">Когда каждый ПК последний раз присылал данные о «железе» и программах — даже если в них ничего не поменялось.
+  Время — когда данные собраны на самом ПК. Красным — ПК, от которых не было выгрузки больше {{ stale_days }} дней: на них стоит
+  проверить скрипт инвентаризации.{% if decommissioned %} Списанные ПК ({{ decommissioned }}) не проверяются.{% endif %}</p>
+
+<div class="inv-summary">
+  <div class="card{{ ' bad' if stale }}"><b>{{ stale }}</b>без выгрузки больше {{ stale_days }} дней</div>
+  <div class="card{{ ' bad' if never }}"><b>{{ never }}</b>ни разу не присылали</div>
+  <div class="card"><b>{{ rows|length - stale }}</b>в порядке</div>
+  <div class="card small">
+    {% if last_archive %}Последний архив: <b class="small">{{ last_archive.created_at[:16]|ru_datetime }}</b>
+      {% if not last_archive.ok %}<span class="inv-stale">не принят</span>{% endif %}
+    {% else %}Архивов ещё не было{% endif %}
+  </div>
+</div>
+
+<form class="card filters" method="get">
+  <label>Аудитория
+    <select name="aud" onchange="this.form.submit()">
+      <option value="">Все</option>
+      {% for a in auditoriums %}<option value="AUD-{{ a.num }}" {{ 'selected' if aud == 'AUD-' ~ a.num }}>AUD-{{ a.num }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="grow">Быстрый фильтр
+    <input type="search" data-filter-table="inv-table" placeholder="hostname…">
+  </label>
+</form>
+
+{% if rows %}
+<div class="table-wrap">
+<table class="table" id="inv-table">
+  <thead><tr><th>ПК</th><th>Аудитория</th><th>«Железо»</th><th>Программы</th><th>Статус</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr class="{{ 'inv-row-stale' if r.stale }}">
+    <td><a href="{{ url_for('computer', hostname=r.hostname) }}" class="mono strong">{{ r.hostname }}</a></td>
+    <td><a href="{{ url_for('auditorium', code=r.aud_code) }}">{{ r.aud_code }}</a></td>
+    {% for x in (r.hw, r.sw) %}
+    <td class="inv-cell nowrap{{ ' inv-stale' if x.stale }}">{{ x.when }}{% if x.ago %}<small>{{ x.ago }}</small>{% endif %}</td>
+    {% endfor %}
+    <td>{{ status_badge(r.status) }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty">Компьютеров не найдено.</div>
+{% endif %}
+{% endblock %}

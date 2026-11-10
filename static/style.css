@@ -727,3 +727,14 @@ p.wake-failed { margin: 10px 0 0; color: var(--bad-text); }
 .icon-btn { display: inline-flex; flex-direction: row; padding: 6px; border-radius: 6px; color: var(--muted); cursor: pointer; }
 .icon-btn:hover { background: var(--chip); color: var(--ink); }
 .form-error { margin: 0; color: var(--bad); font-size: 13px; }
+
+/* ---------- выгрузка с ПК ---------- */
+.nav-count.nav-count-bad { background: var(--bad); color: #fff; }
+.inv-stale { color: var(--bad); font-weight: 600; }
+.inv-summary { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.inv-summary .card { margin: 0; padding: 10px 14px; flex: 1 1 160px; }
+.inv-summary b { display: block; font-size: 22px; line-height: 1.2; }
+.inv-summary .bad b { color: var(--bad); }
+.table tr.inv-row-stale td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+.inv-cell small { display: block; color: var(--muted); }
+.inv-cell.inv-stale small { color: var(--bad); font-weight: 400; }

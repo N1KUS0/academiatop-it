@@ -59,6 +59,12 @@
   <div><dt>Процессор</dt><dd>{{ pc.cpu or '—' }}</dd></div>
   <div><dt>ОЗУ</dt><dd>{{ pc.ram or '—' }}</dd></div>
   <div><dt>Диск</dt><dd>{{ pc.disk or '—' }}</dd></div>
+  {% if is_admin %}
+  <div><dt>Выгрузка</dt><dd>
+    {%- for label, x in (('«железо»', inv_hw), ('программы', inv_sw)) %}
+    <span class="{{ 'inv-stale' if x.stale and pc.status != 'decommissioned' }}" title="{{ x.ago }}">{{ label }} — {{ x.when }}</span>{{ '<br>'|safe if loop.first }}
+    {%- endfor %}</dd></div>
+  {% endif %}
   {% if pc.note %}<div class="wide"><dt>Примечание</dt><dd>{{ pc.note }}</dd></div>{% endif %}
 </dl>
 

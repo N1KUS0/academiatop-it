@@ -41,6 +41,8 @@
     {% if is_admin %}
     <div class="side-group">Администратор</div>
     {{ nav_item('import_page', 'Импорт', 'import', ep.startswith('import')) }}
+    {{ nav_item('inventory_status', 'Выгрузка с ПК', 'clock', ep == 'inventory_status',
+                ('<span class="nav-count nav-count-bad" title="ПК без выгрузки больше 3 дней">' ~ stale_pcs ~ '</span>')|safe if stale_pcs else '') }}
     {{ nav_item('data_page', 'Данные', 'data', ep == 'data_page') }}
     {{ nav_item('users_page', 'Пользователи', 'users', ep.startswith('user') and not (ep == 'user_profile' and request.view_args.user_id == current_user.id)) }}
     {% endif %}

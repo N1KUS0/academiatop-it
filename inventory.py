@@ -8,7 +8,7 @@ import io
 import json
 import re
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import history
 from inventory_rules import CATALOG, NAME, NONE, RAW, RULES, YEAR
@@ -224,6 +224,26 @@ def now_str():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+_COLLECTED_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?|(\d{2})\.(\d{2})\.(\d{4})(?: (\d{2}):(\d{2}))?")
+
+
+def collected_at(value, fallback):
+    """CollectedAt из выгрузки (когда данные собраны на самом ПК) -> ГГГГ-ММ-ДД ЧЧ:ММ.
+    Нет или не разобрать, или время из будущего (часы ПК врут) — fallback (время импорта)."""
+    m = _COLLECTED_RE.search(value or "")
+    if not m:
+        return fallback
+    if m.group(1):
+        y, mo, d, h, mi = m.group(1), m.group(2), m.group(3), m.group(4) or "00", m.group(5) or "00"
+    else:
+        d, mo, y, h, mi = m.group(6), m.group(7), m.group(8), m.group(9) or "00", m.group(10) or "00"
+    try:
+        t = datetime(int(y), int(mo), int(d), int(h), int(mi))
+    except ValueError:
+        return fallback
+    return fallback if t > datetime.now() + timedelta(hours=1) else t.strftime("%Y-%m-%d %H:%M")
+
+
 # --------------------------------------------------------------------------- запись в базу
 
 def software_id(conn, name, stats):
@@ -254,6 +274,12 @@ def apply_import(conn, computers, software, log_history=True):
 
     installs, unknown = collect_software(software, load_aliases(conn))
     sw_rows = {r.get("Hostname", "").strip().upper() for r in software}
+    # Когда собран список программ ПК: своё CollectedAt в software_raw.csv, если оно там есть.
+    sw_collected = {}
+    for r in software:
+        host = r.get("Hostname", "").strip().upper()
+        if r.get("CollectedAt") and r["CollectedAt"] > sw_collected.get(host, ""):
+            sw_collected[host] = r["CollectedAt"]
 
     try:
         for r in computers:
@@ -286,6 +312,16 @@ def apply_import(conn, computers, software, log_history=True):
                 stats["pcs_new"].append(hostname)
                 if log_history:
                     history.log(conn, pc_id, hostname, history.PC_ADDED, source="auto", at=at)
+
+            # Когда ПК последний раз прислал данные — даже если в них ничего не поменялось.
+            # Повторный прогон старого архива время не трогает; MAX — чтобы старый архив, загруженный
+            # вручную, не «состарил» ПК.
+            if log_history:
+                hw_at = collected_at(r.get("CollectedAt"), at)
+                conn.execute("UPDATE computers SET inv_hw_at = MAX(inv_hw_at, ?) WHERE id = ?", (hw_at, pc_id))
+                if pc["ad_hostname"] in sw_rows:
+                    sw_at = collected_at(sw_collected.get(pc["ad_hostname"]) or r.get("CollectedAt"), at)
+                    conn.execute("UPDATE computers SET inv_sw_at = MAX(inv_sw_at, ?) WHERE id = ?", (sw_at, pc_id))
 
             # Нет ни одной строки ПО по этому ПК — сбор не удался, список программ не трогаем.
             if pc["ad_hostname"] not in sw_rows:

@@ -1,4 +1,5 @@
 """Работа с базой SQLite: схема, подключение, справочники."""
+import re
 import sqlite3
 
 from flask import current_app, g
@@ -23,6 +24,8 @@ CREATE TABLE IF NOT EXISTS computers (
     disk          TEXT NOT NULL DEFAULT '',
     status        TEXT NOT NULL DEFAULT 'active',
     note          TEXT NOT NULL DEFAULT '',
+    inv_hw_at     TEXT NOT NULL DEFAULT '',     -- когда ПК последний раз прислал «железо» (время сбора на ПК)
+    inv_sw_at     TEXT NOT NULL DEFAULT '',     -- когда ПК последний раз прислал список программ
     UNIQUE (auditorium_id, num)
 );
 
@@ -278,6 +281,18 @@ def migrate(conn):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(installations)")}
     if "source" not in cols:
         conn.execute("ALTER TABLE installations ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(computers)")}
+    if "inv_hw_at" not in cols:
+        conn.execute("ALTER TABLE computers ADD COLUMN inv_hw_at TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE computers ADD COLUMN inv_sw_at TEXT NOT NULL DEFAULT ''")
+        # До этого обновления время выгрузки хранилось только датой в примечании («Инвентаризация: ГГГГ-ММ-ДД»).
+        for row in conn.execute("SELECT id, note FROM computers").fetchall():
+            m = re.search(r"Инвентаризация:\s*(\d{4}-\d{2}-\d{2})", row["note"] or "")
+            if m:
+                has_auto = conn.execute("SELECT 1 FROM installations WHERE computer_id = ? AND source = 'auto' LIMIT 1",
+                                        (row["id"],)).fetchone()
+                conn.execute("UPDATE computers SET inv_hw_at = ?, inv_sw_at = ? WHERE id = ?",
+                             (m.group(1), m.group(1) if has_auto else "", row["id"]))
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
     if "position" in cols:  # должности были недолго, потом их убрали
         conn.execute("ALTER TABLE users DROP COLUMN position")

@@ -235,10 +235,28 @@ def tickets_unread():
     return get_db().execute(sql, params).fetchone()[0]
 
 
+# ПК без выгрузки дольше стольких дней отмечаются на странице «Выгрузка с ПК» и в меню.
+STALE_DAYS = 3
+
+
+def stale_cutoff():
+    return (datetime.now() - timedelta(days=STALE_DAYS)).strftime("%Y-%m-%d %H:%M")
+
+
+def stale_count():
+    """Сколько ПК (кроме списанных) не присылали «железо» или программы дольше STALE_DAYS дней."""
+    if not is_admin():
+        return 0
+    cutoff = stale_cutoff()
+    return get_db().execute(
+        "SELECT COUNT(*) FROM computers WHERE status != 'decommissioned' AND (inv_hw_at < ? OR inv_sw_at < ?)",
+        (cutoff, cutoff)).fetchone()[0]
+
+
 @app.context_processor
 def inject_globals():
     return dict(is_admin=is_admin(), current_user=current_user(), today=date.today().isoformat(),
-                tickets_unread=tickets_unread())
+                tickets_unread=tickets_unread(), stale_pcs=stale_count())
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -813,6 +831,32 @@ def ru_date(value):
         return value
 
 
+def parse_stamp(value):
+    """«ГГГГ-ММ-ДД ЧЧ:ММ» или «ГГГГ-ММ-ДД» -> datetime или None."""
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value or "", fmt)
+        except ValueError:
+            pass
+    return None
+
+
+def inventory_age(value):
+    """Время последней выгрузки -> {"when": текст, "days": сколько суток назад или None, "stale": bool}."""
+    t = parse_stamp(value)
+    if not t:
+        return {"when": "ни разу", "days": None, "ago": "", "stale": True}
+    days = (datetime.now() - t).total_seconds() / 86400
+    if days < 1:
+        ago = "сегодня" if t.date() == date.today() else "меньше суток назад"
+    else:
+        n = int(days)
+        word = "день" if n % 10 == 1 and n % 100 != 11 else "дня" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else "дней"
+        ago = f"{n} {word} назад"
+    when = t.strftime("%d.%m.%Y %H:%M") if len(value) > 10 else t.strftime("%d.%m.%Y")
+    return {"when": when, "days": days, "ago": ago, "stale": days > STALE_DAYS}
+
+
 @app.template_filter("ru_datetime")
 def ru_datetime(value):
     """«2026-11-08 14:30» -> «08.11.2026 14:30»."""
@@ -1368,6 +1412,33 @@ def save_computer(existing=None):
     return hostname
 
 
+@app.route("/inventory-status")
+@admin_required
+def inventory_status():
+    """Выгрузка с ПК: когда каждый ПК последний раз присылал «железо» и программы."""
+    aud = request.args.get("aud", "")
+    where, params = ["c.status != 'decommissioned'"], []
+    if parse_aud_code(aud):
+        where.append("a.num = ?")
+        params.append(parse_aud_code(aud))
+    rows = []
+    for c in list_computers(" WHERE " + " AND ".join(where), params):
+        hw, sw = inventory_age(c["inv_hw_at"]), inventory_age(c["inv_sw_at"])
+        never = hw["days"] is None and sw["days"] is None
+        oldest = max(x["days"] for x in (hw, sw) if x["days"] is not None) if not never else None
+        rows.append(dict(c, hw=hw, sw=sw, stale=hw["stale"] or sw["stale"], never=never, oldest=oldest))
+    # Сначала проблемные: ни разу, потом самые давние; в порядке — по аудиториям.
+    rows.sort(key=lambda r: (not r["stale"], not r["never"], -(r["oldest"] or 0) if r["stale"] else 0,
+                             r["aud_num"], r["num"]))
+    last_archive = get_db().execute(
+        "SELECT created_at, ok, message FROM imports WHERE origin IN ('api', 'upload', 'cli') "
+        "ORDER BY id DESC LIMIT 1").fetchone()
+    decommissioned = get_db().execute("SELECT COUNT(*) FROM computers WHERE status = 'decommissioned'").fetchone()[0]
+    return render_template("inventory_status.html", rows=rows, aud=aud, auditoriums=list_auditoriums(),
+                           stale=sum(r["stale"] for r in rows), never=sum(r["never"] for r in rows),
+                           last_archive=last_archive, decommissioned=decommissioned, stale_days=STALE_DAYS)
+
+
 @app.route("/computers/new", methods=["GET", "POST"])
 @admin_required
 def computer_new():
@@ -1409,6 +1480,7 @@ def computer(hostname):
         % ",".join("?" * len(TICKET_OPEN)), (pc["id"], pc["id"], *TICKET_OPEN)).fetchall()
     events = history_rows(" WHERE (h.computer_id = ? OR h.hostname = ?)", (pc["id"], pc["hostname"]), limit=31)
     return render_template("computer.html", pc=pc, installs=installs, sw_names=software_names(),
+                           inv_hw=inventory_age(pc["inv_hw_at"]), inv_sw=inventory_age(pc["inv_sw_at"]),
                            open_tickets=open_tickets, pc_macs=netmap.macs_from_note(pc["note"]),
                            events=events[:30], more_events=len(events) > 30)
 
