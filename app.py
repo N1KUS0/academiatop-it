@@ -1250,6 +1250,47 @@ def auditorium_new():
     return redirect(url_for("auditorium", code=aud_code(num)))
 
 
+# Программа считается «программой аудитории», если стоит хотя бы на такой доле её ПК.
+AUD_SOFTWARE_SHARE = 0.5
+
+
+def auditorium_software(computers):
+    """Программы, которые стоят хотя бы на половине ПК аудитории.
+
+    Учитываются ПК, кроме списанных, и только те, о программах которых что-то известно: ПК без единой
+    записи (ещё не было выгрузки) иначе занижал бы долю у всех программ.
+    -> (программы, учтённые ПК, ПК без данных, сколько программ стоит на меньшем числе ПК)"""
+    pcs = {c["id"]: c["hostname"] for c in computers if c["status"] != "decommissioned"}
+    if not pcs:
+        return [], [], [], 0
+    rows = get_db().execute(
+        """SELECT i.computer_id, i.version, s.id, s.name, s.category, s.license_type
+           FROM installations i JOIN software s ON s.id = i.software_id
+           WHERE i.computer_id IN (%s)""" % ",".join("?" * len(pcs)), list(pcs)).fetchall()
+    with_data = sorted({r["computer_id"] for r in rows}, key=lambda i: pcs[i])
+    total = len(with_data)
+    by_sw = {}
+    for r in rows:
+        sw = by_sw.setdefault(r["id"], {"id": r["id"], "name": r["name"], "category": r["category"],
+                                        "license_type": r["license_type"], "pcs": set(), "versions": {}})
+        sw["pcs"].add(r["computer_id"])
+        version = r["version"] or "—"
+        sw["versions"][version] = sw["versions"].get(version, 0) + 1
+    result, rare = [], 0
+    for sw in by_sw.values():
+        count = len(sw["pcs"])
+        if count < total * AUD_SOFTWARE_SHARE:
+            rare += 1
+            continue
+        sw.update(count=count, percent=round(count * 100 / total),
+                  missing=[pcs[i] for i in with_data if i not in sw["pcs"]],
+                  versions=sorted(sw["versions"].items(), key=lambda v: (-v[1], v[0])))
+        result.append(sw)
+    result.sort(key=lambda s: (-s["count"], s["name"].lower()))
+    no_data = [pcs[i] for i in sorted(pcs, key=lambda i: pcs[i]) if i not in set(with_data)]
+    return result, [pcs[i] for i in with_data], no_data, rare
+
+
 @app.route("/auditoriums/<code>")
 def auditorium(code):
     aud = get_auditorium_or_404(code)
@@ -1258,8 +1299,10 @@ def auditorium(code):
     open_tickets = [ticket_dict(r) for r in get_db().execute(
         TICKETS_SQL + " WHERE COALESCE(c.auditorium_id, t.auditorium_id) = ? AND t.status IN (%s) ORDER BY t.id DESC"
         % ",".join("?" * len(TICKET_OPEN)), (current_user()["id"], aud["id"], *TICKET_OPEN))]
+    aud_sw, sw_pcs, sw_no_data, sw_rare = auditorium_software(computers)
     return render_template("auditorium.html", aud=aud, code=aud_code(aud["num"]), computers=computers,
-                           open_tickets=open_tickets)
+                           open_tickets=open_tickets, aud_sw=aud_sw, sw_pcs=sw_pcs, sw_no_data=sw_no_data,
+                           sw_rare=sw_rare)
 
 
 @app.route("/auditoriums/<code>/edit", methods=["POST"])

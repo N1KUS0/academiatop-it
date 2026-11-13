@@ -738,3 +738,11 @@ p.wake-failed { margin: 10px 0 0; color: var(--bad-text); }
 .table tr.inv-row-stale td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
 .inv-cell small { display: block; color: var(--muted); }
 .inv-cell.inv-stale small { color: var(--bad); font-weight: 400; }
+
+/* ---------- программы аудитории ---------- */
+.aud-sw-head { margin-top: 22px; }
+.aud-sw-head h2 { margin: 0; }
+.aud-sw-filter { max-width: 260px; }
+.share-bar { display: inline-block; vertical-align: middle; width: 64px; height: 6px; margin-right: 6px;
+             border-radius: 3px; background: var(--chip); overflow: hidden; }
+.share-bar span { display: block; height: 100%; background: var(--ok); border-radius: 3px; }

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import csrf, status_badge, delete_button, author_link %}
+{% from "macros.html" import csrf, status_badge, delete_button, author_link, cat_badge %}
 {% from "icons.html" import icon %}
 {% block title %}{{ code }}{% endblock %}
 {% block content %}
@@ -62,6 +62,41 @@
 </div>
 {% else %}
 <div class="card empty">В аудитории пока нет компьютеров.</div>
+{% endif %}
+
+{% if sw_pcs %}
+<div class="page-head aud-sw-head">
+  <h2>Программы аудитории <small class="muted">{{ aud_sw|length }}</small></h2>
+  {% if aud_sw|length > 8 %}<input type="search" class="aud-sw-filter" data-filter-table="aud-sw" placeholder="Найти программу…">{% endif %}
+</div>
+<p class="muted small">Программы, которые стоят хотя бы на половине ПК аудитории. Учтено ПК: {{ sw_pcs|length }}
+  {%- if sw_no_data %} (без {{ sw_no_data|join(', ') }} — о программах на них данных нет){% endif %}; списанные не учитываются.
+  {%- if sw_rare %} Программ, которые стоят меньше чем на половине ПК: {{ sw_rare }} — они видны на страницах ПК.{% endif %}</p>
+{% if aud_sw %}
+<div class="table-wrap">
+<table class="table" id="aud-sw">
+  <thead><tr><th>Программа</th><th>Категория</th><th>Установлена</th><th>Версия</th><th>Нет на ПК</th></tr></thead>
+  <tbody>
+  {% for s in aud_sw %}
+  <tr>
+    <td><a href="{{ url_for('software', sw_id=s.id) }}" class="strong">{{ s.name }}</a></td>
+    <td>{{ cat_badge(s.category) }}</td>
+    <td class="nowrap">
+      <span class="share-bar" title="{{ s.percent }}%"><span style="width: {{ s.percent }}%"></span></span>
+      {% if not s.missing %}на всех {{ s.count }}{% else %}{{ s.count }} из {{ sw_pcs|length }}{% endif %}</td>
+    <td class="small">
+      {%- if s.versions|length == 1 %}{{ s.versions[0][0] }}
+      {%- else %}{% for v, n in s.versions %}{{ v }} <span class="muted">({{ n }})</span>{{ ', ' if not loop.last }}{% endfor %}{% endif %}</td>
+    <td class="small mono">
+      {%- for h in s.missing %}<a href="{{ url_for('computer', hostname=h) }}" class="nowrap">{{ h }}</a>{{ ', ' if not loop.last }}{% endfor %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty">Нет программ, которые стояли бы хотя бы на половине ПК.</div>
+{% endif %}
 {% endif %}
 
 {% if is_admin %}
