@@ -25,6 +25,7 @@ import inventory
 import netmap
 import shutdown
 import telegram
+import telegram_text
 from db import (CATEGORIES, COMPUTERS_SQL, LICENSE_TYPES, STATUSES, TICKET_KINDS,
                 TICKET_OPEN, TICKET_STATUSES, aud_code, computer_dict, get_db,
                 parse_aud_code, parse_hostname, pc_hostname)
@@ -716,9 +717,10 @@ def forgot_password():
             if not repeat:
                 from html import escape
                 name = row["full_name"] or row["username"]
-                notify_admin(f"🔑 <b>Забыл пароль:</b> {escape(name)} (логин <code>{escape(row['username'])}</code>)\n"
-                             f"Задайте новый пароль в профиле и сообщите его:\n"
-                             f"{site_url_for('user_profile', user_id=row['id'])}")
+                profile = telegram_text.link(site_url_for("user_profile", user_id=row["id"]), "Открыть профиль →")
+                notify_admin(telegram_text.message("🔑 <b>Запрос на сброс пароля</b>",
+                             f"{escape(name)} · логин <code>{escape(row['username'])}</code>\n"
+                             "Задайте новый пароль в профиле и сообщите его сотруднику.", profile))
         conn.commit()
         return render_template("forgot.html", sent=True)
     return render_template("forgot.html")
@@ -2415,17 +2417,9 @@ def notify_admin(text):
         telegram.send_async(token, chat, text)
 
 
-def tg_ticket_text(icon, t, who, body, photos=0):
-    from html import escape
-    lines = [f"{icon} <b>Заявка №{t['id']}: {escape(t['title'])}</b>",
-             " · ".join(escape(x) for x in [TICKET_KINDS.get(t["kind"], ""), t["pc_label"] or "",
-                                            need_by_text(t) if t["need_by"] else "", who] if x)]
-    if photos:
-        lines.append(f"📎 фото: {photos}")
-    if body:
-        lines += ["", escape(body if len(body) <= 700 else body[:700] + "…")]
-    lines += ["", ticket_url(t["id"])]
-    return "\n".join(lines)
+def tg_admin_ticket(event, t, who, body, photos=0):
+    return telegram_text.admin_ticket(event, t, who, body, photos, TICKET_KINDS[t["kind"]],
+                                      need_by_text(t) if t["need_by"] else "", ticket_url(t["id"]))
 
 
 def similar_tickets(computer_ids=(), software="", title="", exclude=None, limit=5, auditorium_id=None):
@@ -2606,7 +2600,7 @@ def ticket_new():
             conn.commit()
             app.logger.warning("ticket #%s created by %s", cur.lastrowid, user["username"])
             if not user["admin"]:
-                notify_admin(tg_ticket_text("🆕", get_ticket_or_404(cur.lastrowid), user["name"], form["body"],
+                notify_admin(tg_admin_ticket("new", get_ticket_or_404(cur.lastrowid), user["name"], form["body"],
                                             len(photos)))
             flash(f"Заявка №{cur.lastrowid} отправлена. Ответ появится здесь, на странице заявки.", "success")
             if photo_warning:
@@ -2794,7 +2788,7 @@ def ticket_edit(ticket_id):
     conn.commit()
     app.logger.warning("ticket #%s edited by %s: %s", ticket_id, user["username"], note)
     if not user["admin"]:
-        notify_admin(tg_ticket_text("✏️", new, user["name"], "Изменения: " + note))
+        notify_admin(tg_admin_ticket("edit", new, user["name"], note))
     return jsonify(ok=True, changed=True)
 
 
@@ -2868,8 +2862,8 @@ def ticket_reply(ticket_id):
     mark_watchers_unread(conn, ticket_id, except_user=user["id"])
     conn.commit()
     if not user["admin"]:
-        notify_admin(tg_ticket_text("🔄" if status == "new" else "💬", t, user["name"], body, len(photos)))
-    notify_ticket_employees(t, user, body or (TICKET_STATUSES[status] if status else ""), len(photos))
+        notify_admin(tg_admin_ticket("reopened" if status == "new" else "reply", t, user["name"], body, len(photos)))
+    notify_ticket_employees(t, user, body, len(photos), status)
     flash("Сообщение отправлено." if body or photos else "Статус изменён.", "success")
     return redirect(url_for("ticket", ticket_id=ticket_id) + "#last")
 
@@ -2902,7 +2896,7 @@ def ticket_install(ticket_id):
     conn.execute("UPDATE tickets SET status = 'done', updated_at = ? WHERE id = ?", (stamp, ticket_id))
     mark_watchers_unread(conn, ticket_id)
     conn.commit()
-    notify_ticket_employees(t, current_user(), f"Программа {t['software_name']} установлена на {where}.")
+    notify_ticket_employees(t, current_user(), f"Программа {t['software_name']} установлена на {where}.", status="done")
     flash(f"{t['software_name']} отмечена на {where}, заявка выполнена."
           + (" Программа добавлена в справочник — проверьте категорию и лицензию." if created else ""), "success")
     return redirect(url_for("ticket", ticket_id=ticket_id))
@@ -2983,17 +2977,16 @@ def employee_telegram_status():
 
 
 def telegram_start_reply(conn, bot, chat, code):
+    portal = db.get_setting("site_url", "")
     if code:
         changed = conn.execute("""UPDATE OR IGNORE employee_telegram SET chat_id=?, challenge=NULL, expires=NULL
             WHERE bot_id=? AND challenge=? AND expires>? AND chat_id IS NULL""",
             (chat, bot, hashlib.sha256(code.encode()).hexdigest(), int(time.time()))).rowcount
         if changed:
-            return "✅ Telegram подключён к порталу Академии ТОП. Ответы по вашим заявкам будут приходить сюда."
+            return telegram_text.start("linked", portal)
     if conn.execute("SELECT 1 FROM employee_telegram WHERE bot_id=? AND chat_id=?", (bot, chat)).fetchone():
-        return "Этот Telegram уже подключён к порталу. Чтобы сменить привязку, отключите его в прежнем профиле."
-    if code:
-        return "Не удалось привязать Telegram. Получите новую ссылку в своём профиле и откройте её."
-    return "Чтобы привязать Telegram, откройте свой профиль на портале Академии ТОП и нажмите «Подключить Telegram»."
+        return telegram_text.start("already", portal)
+    return telegram_text.start("invalid" if code else "hello", portal)
 
 
 @app.cli.command("telegram-listen")
@@ -3071,11 +3064,11 @@ def employee_telegram():
     return back
 
 
-def notify_ticket_employees(t, user, body, photos=0):
+def notify_ticket_employees(t, user, body, photos=0, status=""):
     token = db.get_setting("telegram_token", "")
     if not token:
         return
-    chats = get_db().execute("""SELECT e.chat_id FROM employee_telegram e
+    chats = get_db().execute("""SELECT e.chat_id, e.user_id FROM employee_telegram e
         JOIN ticket_watchers w ON w.user_id=e.user_id
         WHERE w.ticket_id=? AND e.user_id IS NOT ? AND e.bot_id=? AND e.chat_id IS NOT NULL""",
         (t["id"], user["id"], token.partition(":")[0]))
@@ -3083,7 +3076,9 @@ def notify_ticket_employees(t, user, body, photos=0):
     for row in chats:
         if not user["admin"] and str(row["chat_id"]) == admin_chat:
             continue  # уже уходит штатное уведомление администратору
-        telegram.send_async(token, row["chat_id"], tg_ticket_text("💬", t, user["name"], body, photos))
+        text = telegram_text.employee_ticket(t, user["name"], body, photos, TICKET_STATUSES.get(status, ""),
+                                             ticket_url(t["id"]) + "#last", row["user_id"] == t["author_id"])
+        telegram.send_async(token, row["chat_id"], text)
 
 @app.route("/settings/telegram", methods=["POST"])
 @admin_required
@@ -3118,7 +3113,9 @@ def telegram_settings():
                 flash(f"chat id {chat_id} — {title}", "info")
         else:
             chat = form_str("chat", 50) or db.get_setting("telegram_chat", "")
-            telegram.send(token, chat, f"✅ {SITE_NAME}: уведомления о заявках будут приходить сюда.")
+            portal = telegram_text.link(form_str("site_url") or db.get_setting("site_url", ""), "Открыть портал →")
+            telegram.send(token, chat, telegram_text.message("✅ <b>Проверка прошла успешно!</b>",
+                          "Сюда будут приходить уведомления администратора о заявках Академии ТОП.", portal))
             flash("Тестовое сообщение отправлено — проверьте Telegram.", "success")
     except RuntimeError as e:
         flash(f"Telegram ответил ошибкой: {e}", "danger")
