@@ -72,29 +72,25 @@ def send_async(token, chat_id, text):
 
 def recent_chats(token):
     """Чаты, из которых недавно писали боту: [(chat_id, название)]."""
+    return list(chat_names(call(token, "getUpdates", limit=50)).items())
+
+
+def chat_names(updates):
     chats = {}
-    for upd in call(token, "getUpdates", limit=50):
+    for upd in updates:
         msg = upd.get("message") or upd.get("my_chat_member") or upd.get("channel_post") or {}
         chat = msg.get("chat")
         if chat:
             title = chat.get("title") or " ".join(
                 filter(None, [chat.get("first_name"), chat.get("last_name")])) or chat.get("username", "")
             chats[chat["id"]] = f"{title} ({chat.get('type', '')})"
-    return list(chats.items())
+    return chats
 
 
-def link_messages(token, consume):
-    """Read private /start messages. Process every pending link before advancing the offset."""
-    offset = 0
-    for _ in range(10):
-        updates = call(token, "getUpdates", offset=offset, limit=100)
-        for update in updates:
-            msg = update.get("message", {})
-            chat = msg.get("chat", {})
-            command, _, code = msg.get("text", "").partition(" ")
-            if (command == "/start" and len(code) == 32 and chat.get("type") == "private"
-                    and chat.get("id") == msg.get("from", {}).get("id") and chat.get("id")):
-                consume(code, chat["id"])
-        if len(updates) < 100:
-            return
-        offset = updates[-1]["update_id"] + 1
+def private_start(update):
+    msg = update.get("message") or {}
+    chat = msg.get("chat") or {}
+    args = msg.get("text", "").split()
+    if (args and args[0] == "/start" and chat.get("type") == "private" and chat.get("id")
+            and chat["id"] == msg.get("from", {}).get("id")):
+        return chat["id"], args[1] if len(args) == 2 else ""

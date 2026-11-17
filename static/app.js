@@ -754,3 +754,36 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
   schedule();
   setInterval(function () { if (jobs.some(function (j) { return j.state === "waiting"; })) render(); }, 1000);
 })();
+// Обновляем только блок Telegram, не теряя несохранённые поля в профиле.
+(function () {
+  const note = document.querySelector('[data-tg-status]');
+  if (!note) return;
+  const form = note.closest('form');
+  let finished = false, busy = false;
+  async function poll() {
+    if (finished || busy || document.hidden) return;
+    busy = true;
+    try {
+      const response = await fetch(note.dataset.tgStatus, {cache: 'no-store'});
+      if (!response.ok || response.redirected) return;
+      const {state} = await response.json();
+      if (state !== 'linked' && state !== 'inactive') return;
+      finished = true;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', poll);
+      form.querySelector('a').remove();
+      const button = form.querySelector('button[value="unlink"]');
+      if (state === 'linked') {
+        note.textContent = 'Telegram подключён. Теперь ответы по заявкам будут приходить в бот.';
+        button.textContent = 'Отключить';
+      } else {
+        note.textContent = 'Ссылка больше не действует. Получите новую, чтобы подключить Telegram.';
+        button.value = 'start';
+        button.textContent = 'Получить новую ссылку';
+      }
+    } catch (_) { /* Временная потеря сети: повторим при следующей проверке. */ }
+    finally { busy = false; }
+  }
+  const timer = setInterval(poll, 3000);
+  document.addEventListener('visibilitychange', poll);
+})();

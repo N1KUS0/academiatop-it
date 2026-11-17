@@ -55,9 +55,8 @@
     <p>Подключено. Бот присылает ответы по вашим заявкам и тем, за которыми вы следите.</p>
     <button name="action" value="unlink" class="btn">Отключить</button>
     {% elif tg_url %}
-    <p>Откройте бота в своём Telegram, нажмите «Старт», затем вернитесь сюда. Личная ссылка действует 10 минут — не пересылайте её.</p>
+    <p data-tg-status="{{ url_for('employee_telegram_status') }}" aria-live="polite">Откройте бота и нажмите «Старт». Бот подтвердит привязку, а статус здесь обновится автоматически. Личная ссылка действует 10 минут — не пересылайте её.</p>
     <a class="btn btn-primary" href="{{ tg_url }}" target="_blank" rel="noreferrer">Открыть бота</a>
-    <button name="action" value="confirm" class="btn">Проверить привязку</button>
     <button name="action" value="unlink" class="btn btn-link">Отмена</button>
     {% else %}
     <p>Получайте ответы по своим заявкам и тем, за которыми вы следите.</p>

@@ -84,6 +84,10 @@ fi
 
 echo "==> Перезапуск"
 $SUDO systemctl restart registry
+$SUDO cp "$APP_DIR/deploy/registry-telegram.service" /etc/systemd/system/
+$SUDO systemctl daemon-reload
+$SUDO systemctl enable registry-telegram.service
+$SUDO systemctl restart registry-telegram.service
 
 if [ "$NGINX_CHANGED" = 1 ]; then
     echo "==> nginx: конфиг изменился"

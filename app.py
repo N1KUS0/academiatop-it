@@ -2972,6 +2972,66 @@ def employee_telegram_link(user_id, token):
     return get_db().execute("SELECT chat_id, challenge, expires FROM employee_telegram WHERE user_id=? AND bot_id=?",
                             (user_id, token.partition(":")[0])).fetchone()
 
+
+@app.get("/account/telegram/status")
+def employee_telegram_status():
+    link = employee_telegram_link(current_user()["id"], db.get_setting("telegram_token", ""))
+    pending = bool(link and link["challenge"] and link["expires"] > time.time())
+    response = jsonify(state="linked" if link and link["chat_id"] else "pending" if pending else "inactive")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def telegram_start_reply(conn, bot, chat, code):
+    if code:
+        changed = conn.execute("""UPDATE OR IGNORE employee_telegram SET chat_id=?, challenge=NULL, expires=NULL
+            WHERE bot_id=? AND challenge=? AND expires>? AND chat_id IS NULL""",
+            (chat, bot, hashlib.sha256(code.encode()).hexdigest(), int(time.time()))).rowcount
+        if changed:
+            return "✅ Telegram подключён к порталу Академии ТОП. Ответы по вашим заявкам будут приходить сюда."
+    if conn.execute("SELECT 1 FROM employee_telegram WHERE bot_id=? AND chat_id=?", (bot, chat)).fetchone():
+        return "Этот Telegram уже подключён к порталу. Чтобы сменить привязку, отключите его в прежнем профиле."
+    if code:
+        return "Не удалось привязать Telegram. Получите новую ссылку в своём профиле и откройте её."
+    return "Чтобы привязать Telegram, откройте свой профиль на портале Академии ТОП и нажмите «Подключить Telegram»."
+
+
+@app.cli.command("telegram-listen")
+def telegram_listen():
+    """Единственный получатель обновлений бота, независимо от веб-процессов."""
+    while True:
+        token = db.get_setting("telegram_token", "")
+        if not token:
+            time.sleep(5)
+            continue
+        bot = token.partition(":")[0]
+        cursor_key, chats_key = "tg_cursor_" + bot, "tg_chats_" + bot
+        offset, saved = json.loads(db.get_setting(cursor_key, "[0,0]"))
+        try:
+            updates = telegram.call(token, "getUpdates", offset=offset if time.time()-saved < 604800 else 0,
+                                    timeout=20, _timeout=30)
+            if not updates or db.get_setting("telegram_token", "") != token:
+                continue
+            chats = dict(json.loads(db.get_setting(chats_key, "[]")))
+            for upd in updates:
+                for cid, title in telegram.chat_names([upd]).items():
+                    chats.pop(cid, None)
+                    chats[cid] = title
+                start = telegram.private_start(upd)
+                if start:
+                    chat, code = start
+                    reply = telegram_start_reply(get_db(), bot, chat, code)
+                    get_db().commit()  # сначала привязка, только затем подтверждение
+                    try:
+                        telegram.send(token, chat, reply)
+                    except RuntimeError as e:
+                        app.logger.warning("telegram: не доставлен ответ на /start: %s", e)
+            db.set_setting(chats_key, json.dumps(list(chats.items())[-50:]))
+            db.set_setting(cursor_key, json.dumps([updates[-1]["update_id"] + 1, int(time.time())]))
+        except RuntimeError as e:
+            app.logger.warning("telegram: приём обновлений: %s", e)
+            time.sleep(5)
+
 @app.post("/account/telegram")
 def employee_telegram():
     uid = current_user()["id"]
@@ -3003,22 +3063,7 @@ def employee_telegram():
             conn.commit()
             session["tg_link"] = {"hash": digest, "url": f"https://t.me/{username}?start={code}"}
         elif action == "confirm":
-            def consume(code, chat):
-                conn.execute("""UPDATE OR IGNORE employee_telegram SET chat_id=?, challenge=NULL, expires=NULL
-                             WHERE bot_id=? AND challenge=? AND expires>? AND chat_id IS NULL""",
-                             (chat, bot, hashlib.sha256(code.encode()).hexdigest(), int(time.time())))
-                conn.commit()
-
-            row = conn.execute("SELECT * FROM employee_telegram WHERE user_id=? AND bot_id=?", (uid, bot)).fetchone()
-            if row and row["challenge"] and row["expires"] > time.time():
-                telegram.link_messages(token, consume)
-            if conn.execute("SELECT 1 FROM employee_telegram WHERE user_id=? AND bot_id=? AND chat_id IS NOT NULL",
-                            (uid, bot)).fetchone():
-                session.pop("tg_link", None)
-                flash("Telegram подключён.", "success")
-            else:
-                flash("Привязка не найдена. Нажмите «Старт» в боте и повторите проверку. "
-                      "Если аккаунт уже подключён к другому профилю, сначала отключите его там.", "warning")
+            return back  # совместимость с уже открытой страницей старой версии
         else:
             abort(400)
     except RuntimeError as e:
@@ -3061,7 +3106,11 @@ def telegram_settings():
         return redirect(url_for("data_page") + "#telegram")
     try:
         if action == "chats":
-            chats = telegram.recent_chats(token)
+            # До сохранения токена слушатель его ещё не обслуживает.
+            if token.partition(":")[0] == db.get_setting("telegram_token", "").partition(":")[0]:
+                chats = json.loads(db.get_setting("tg_chats_" + token.partition(":")[0], "[]"))
+            else:
+                chats = telegram.recent_chats(token)
             if not chats:
                 flash("Боту пока никто не писал. Напишите боту любое сообщение (или добавьте его в группу) "
                       "и нажмите кнопку ещё раз.", "warning")

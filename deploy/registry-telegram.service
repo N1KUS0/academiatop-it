@@ -1,0 +1,21 @@
+[Unit]
+Description=Academia TOP Telegram bot listener
+After=network-online.target registry.service
+Wants=network-online.target
+
+[Service]
+User=registry
+Group=registry
+WorkingDirectory=/opt/registry
+Environment=REGISTRY_DB=/opt/registry/instance/registry.db
+ExecStart=/opt/registry/.venv/bin/flask --app app telegram-listen
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/registry/instance
+
+[Install]
+WantedBy=multi-user.target
