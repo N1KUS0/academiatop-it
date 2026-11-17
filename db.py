@@ -185,6 +185,14 @@ CREATE TABLE IF NOT EXISTS ticket_attachments (
 CREATE INDEX IF NOT EXISTS ticket_attachments_msg ON ticket_attachments (message_id);
 
 -- Кто следит за заявкой: автор и те, кого она «тоже касается». unread — есть новое для этого пользователя.
+CREATE TABLE IF NOT EXISTS employee_telegram (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    bot_id TEXT NOT NULL,
+    chat_id INTEGER UNIQUE,
+    challenge TEXT UNIQUE,
+    expires INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS ticket_watchers (
     ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
     user_id   INTEGER NOT NULL,

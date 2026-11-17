@@ -81,3 +81,20 @@ def recent_chats(token):
                 filter(None, [chat.get("first_name"), chat.get("last_name")])) or chat.get("username", "")
             chats[chat["id"]] = f"{title} ({chat.get('type', '')})"
     return list(chats.items())
+
+
+def link_messages(token, consume):
+    """Read private /start messages. Process every pending link before advancing the offset."""
+    offset = 0
+    for _ in range(10):
+        updates = call(token, "getUpdates", offset=offset, limit=100)
+        for update in updates:
+            msg = update.get("message", {})
+            chat = msg.get("chat", {})
+            command, _, code = msg.get("text", "").partition(" ")
+            if (command == "/start" and len(code) == 32 and chat.get("type") == "private"
+                    and chat.get("id") == msg.get("from", {}).get("id") and chat.get("id")):
+                consume(code, chat["id"])
+        if len(updates) < 100:
+            return
+        offset = updates[-1]["update_id"] + 1

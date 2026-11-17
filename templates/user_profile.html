@@ -46,6 +46,27 @@
 </section>
 {% endif %}
 
+{% if is_self and tg_enabled %}
+<section class="card" id="telegram">
+  <h2>Уведомления в Telegram</h2>
+  <form method="post" action="{{ url_for('employee_telegram') }}">
+    {{ csrf() }}
+    {% if tg_linked %}
+    <p>Подключено. Бот присылает ответы по вашим заявкам и тем, за которыми вы следите.</p>
+    <button name="action" value="unlink" class="btn">Отключить</button>
+    {% elif tg_url %}
+    <p>Откройте бота в своём Telegram, нажмите «Старт», затем вернитесь сюда. Личная ссылка действует 10 минут — не пересылайте её.</p>
+    <a class="btn btn-primary" href="{{ tg_url }}" target="_blank" rel="noreferrer">Открыть бота</a>
+    <button name="action" value="confirm" class="btn">Проверить привязку</button>
+    <button name="action" value="unlink" class="btn btn-link">Отмена</button>
+    {% else %}
+    <p>Получайте ответы по своим заявкам и тем, за которыми вы следите.</p>
+    <button name="action" value="start" class="btn">Подключить Telegram</button>
+    {% endif %}
+  </form>
+</section>
+{% endif %}
+
 {% if is_admin and user.reset_requested_at %}
 <div class="card hint">
   <b>{{ user.reset_requested_at }} нажал «Забыли пароль?».</b>

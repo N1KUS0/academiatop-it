@@ -576,7 +576,14 @@ def user_profile(user_id):
     tickets = [ticket_dict(r) for r in get_db().execute(
         TICKETS_SQL + " WHERE t.author_id = ? ORDER BY t.status IN ('done', 'rejected'), t.updated_at DESC, t.id DESC",
         (me["id"], user_id))]
+    token = db.get_setting("telegram_token", "") if is_self else ""
+    tg = get_db().execute("SELECT chat_id, challenge, expires FROM employee_telegram WHERE user_id=? AND bot_id=?",
+                          (user_id, token.partition(":")[0])).fetchone() if token else None
+    pending = session.get("tg_link", {})
+    link_url = (pending.get("url") if tg and tg["challenge"] and tg["expires"] > time.time()
+                and pending.get("hash") == tg["challenge"] else None)
     return render_template("user_profile.html", user=user, form=form, tickets=tickets, is_self=is_self,
+                           tg_enabled=bool(token), tg_linked=tg and tg["chat_id"], tg_url=link_url,
                            min_len=MIN_PASSWORD_LEN, avatars_ok=pillow_available())
 
 
@@ -2859,6 +2866,7 @@ def ticket_reply(ticket_id):
     conn.commit()
     if not user["admin"]:
         notify_admin(tg_ticket_text("🔄" if status == "new" else "💬", t, user["name"], body, len(photos)))
+    notify_ticket_employees(t, user, body or (TICKET_STATUSES[status] if status else ""), len(photos))
     flash("Сообщение отправлено." if body or photos else "Статус изменён.", "success")
     return redirect(url_for("ticket", ticket_id=ticket_id) + "#last")
 
@@ -2891,6 +2899,7 @@ def ticket_install(ticket_id):
     conn.execute("UPDATE tickets SET status = 'done', updated_at = ? WHERE id = ?", (stamp, ticket_id))
     mark_watchers_unread(conn, ticket_id)
     conn.commit()
+    notify_ticket_employees(t, current_user(), f"Программа {t['software_name']} установлена на {where}.")
     flash(f"{t['software_name']} отмечена на {where}, заявка выполнена."
           + (" Программа добавлена в справочник — проверьте категорию и лицензию." if created else ""), "success")
     return redirect(url_for("ticket", ticket_id=ticket_id))
@@ -2955,6 +2964,74 @@ def ticket_delete(ticket_id):
 
 
 # --------------------------------------------------------------------------- Telegram
+
+@app.post("/account/telegram")
+def employee_telegram():
+    uid = current_user()["id"]
+    if uid is None or current_user()["admin"]:
+        abort(403)
+    conn, action = get_db(), request.form.get("action")
+    token = db.get_setting("telegram_token", "")
+    bot = token.partition(":")[0]
+    back = redirect(url_for("user_profile", user_id=uid) + "#telegram")
+    if action == "unlink":
+        conn.execute("DELETE FROM employee_telegram WHERE user_id=?", (uid,))
+        conn.commit()
+        session.pop("tg_link", None)
+        flash("Telegram отключён.", "info")
+        return back
+    if not token:
+        flash("Бот пока не настроен.", "warning")
+        return back
+    try:
+        if action == "start":
+            username = telegram.call(token, "getMe")["username"]
+            code = secrets.token_urlsafe(24)
+            digest = hashlib.sha256(code.encode()).hexdigest()
+            conn.execute("""INSERT INTO employee_telegram(user_id, bot_id, challenge, expires) VALUES (?,?,?,?)
+                         ON CONFLICT(user_id) DO UPDATE SET bot_id=excluded.bot_id, chat_id=NULL,
+                         challenge=excluded.challenge, expires=excluded.expires
+                         WHERE employee_telegram.chat_id IS NULL OR employee_telegram.bot_id != excluded.bot_id""",
+                         (uid, bot, digest, int(time.time()) + 600))
+            conn.commit()
+            session["tg_link"] = {"hash": digest, "url": f"https://t.me/{username}?start={code}"}
+        elif action == "confirm":
+            def consume(code, chat):
+                conn.execute("""UPDATE OR IGNORE employee_telegram SET chat_id=?, challenge=NULL, expires=NULL
+                             WHERE bot_id=? AND challenge=? AND expires>? AND chat_id IS NULL""",
+                             (chat, bot, hashlib.sha256(code.encode()).hexdigest(), int(time.time())))
+                conn.commit()
+
+            row = conn.execute("SELECT * FROM employee_telegram WHERE user_id=? AND bot_id=?", (uid, bot)).fetchone()
+            if row and row["challenge"] and row["expires"] > time.time():
+                telegram.link_messages(token, consume)
+            if conn.execute("SELECT 1 FROM employee_telegram WHERE user_id=? AND bot_id=? AND chat_id IS NOT NULL",
+                            (uid, bot)).fetchone():
+                session.pop("tg_link", None)
+                flash("Telegram подключён.", "success")
+            else:
+                flash("Привязка не найдена. Нажмите «Старт» в боте и повторите проверку. "
+                      "Если аккаунт уже подключён к другому профилю, сначала отключите его там.", "warning")
+        else:
+            abort(400)
+    except RuntimeError as e:
+        flash(f"Не удалось проверить Telegram: {e}", "warning")
+    return back
+
+
+def notify_ticket_employees(t, user, body, photos=0):
+    token = db.get_setting("telegram_token", "")
+    if not token:
+        return
+    chats = get_db().execute("""SELECT e.chat_id FROM employee_telegram e
+        JOIN ticket_watchers w ON w.user_id=e.user_id
+        WHERE w.ticket_id=? AND e.user_id IS NOT ? AND e.bot_id=? AND e.chat_id IS NOT NULL""",
+        (t["id"], user["id"], token.partition(":")[0]))
+    admin_chat = db.get_setting("telegram_chat", "")
+    for row in chats:
+        if not user["admin"] and str(row["chat_id"]) == admin_chat:
+            continue  # уже уходит штатное уведомление администратору
+        telegram.send_async(token, row["chat_id"], tg_ticket_text("💬", t, user["name"], body, photos))
 
 @app.route("/settings/telegram", methods=["POST"])
 @admin_required
