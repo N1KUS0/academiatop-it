@@ -3034,11 +3034,14 @@ def employee_telegram():
     token = db.get_setting("telegram_token", "")
     bot = token.partition(":")[0]
     back = redirect(url_for("user_profile", user_id=uid) + "#telegram")
-    if action == "unlink":
-        conn.execute("DELETE FROM employee_telegram WHERE user_id=?", (uid,))
+    if action in ("cancel_link", "confirm_unlink", "unlink"):
+        # Старые вкладки и «Отмена» не должны удалить уже подтверждённую привязку.
+        changed = conn.execute("DELETE FROM employee_telegram WHERE user_id=? AND (chat_id IS NULL OR ?)",
+                               (uid, action == "confirm_unlink")).rowcount
         conn.commit()
         session.pop("tg_link", None)
-        flash("Telegram отключён.", "info")
+        if changed:
+            flash("Telegram отключён." if action == "confirm_unlink" else "Привязка отменена.", "info")
         return back
     if not token:
         flash("Бот пока не настроен.", "warning")

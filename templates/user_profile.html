@@ -53,14 +53,21 @@
     {{ csrf() }}
     {% if tg_linked %}
     <p>Подключено. Бот присылает ответы по вашим заявкам и тем, за которыми вы следите.</p>
-    <button name="action" value="unlink" class="btn">Отключить</button>
     {% elif tg_url %}
     <p data-tg-status="{{ url_for('employee_telegram_status') }}" aria-live="polite">Откройте бота и нажмите «Старт». Бот подтвердит привязку, а статус здесь обновится автоматически. Личная ссылка действует 10 минут — не пересылайте её.</p>
     <a class="btn btn-primary" href="{{ tg_url }}" target="_blank" rel="noreferrer">Открыть бота</a>
-    <button name="action" value="unlink" class="btn btn-link">Отмена</button>
+    <button name="action" value="cancel_link" class="btn btn-link">Отмена</button>
     {% else %}
     <p>Получайте ответы по своим заявкам и тем, за которыми вы следите.</p>
     <button name="action" value="start" class="btn">Подключить Telegram</button>
+    {% endif %}
+    {% if tg_linked or tg_url %}
+    <details data-tg-unlink {% if not tg_linked %}hidden{% endif %}>
+      <summary class="btn">Отключить Telegram</summary>
+      <p>Отключить уведомления? Ответы по заявкам останутся на портале, но бот больше не будет присылать их в Telegram.</p>
+      <a class="btn btn-primary" data-tg-keep href="{{ url_for('user_profile', user_id=user.id, _anchor='telegram') }}">Оставить уведомления</a>
+      <button name="action" value="confirm_unlink" class="btn">Да, отключить</button>
+    </details>
     {% endif %}
   </form>
 </section>

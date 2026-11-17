@@ -756,6 +756,12 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
 })();
 // Обновляем только блок Telegram, не теряя несохранённые поля в профиле.
 (function () {
+  const unlink = document.querySelector('[data-tg-unlink]');
+  if (unlink) unlink.querySelector('[data-tg-keep]').addEventListener('click', function (e) {
+    e.preventDefault();
+    unlink.open = false;
+    unlink.querySelector('summary').focus();
+  });
   const note = document.querySelector('[data-tg-status]');
   if (!note) return;
   const form = note.closest('form');
@@ -772,10 +778,11 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', poll);
       form.querySelector('a').remove();
-      const button = form.querySelector('button[value="unlink"]');
+      const button = form.querySelector('button[value="cancel_link"]');
       if (state === 'linked') {
         note.textContent = 'Telegram подключён. Теперь ответы по заявкам будут приходить в бот.';
-        button.textContent = 'Отключить';
+        button.remove();
+        unlink.hidden = false;
       } else {
         note.textContent = 'Ссылка больше не действует. Получите новую, чтобы подключить Telegram.';
         button.value = 'start';
