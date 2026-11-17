@@ -577,8 +577,7 @@ def user_profile(user_id):
         TICKETS_SQL + " WHERE t.author_id = ? ORDER BY t.status IN ('done', 'rejected'), t.updated_at DESC, t.id DESC",
         (me["id"], user_id))]
     token = db.get_setting("telegram_token", "") if is_self else ""
-    tg = get_db().execute("SELECT chat_id, challenge, expires FROM employee_telegram WHERE user_id=? AND bot_id=?",
-                          (user_id, token.partition(":")[0])).fetchone() if token else None
+    tg = employee_telegram_link(user_id, token) if token else None
     pending = session.get("tg_link", {})
     link_url = (pending.get("url") if tg and tg["challenge"] and tg["expires"] > time.time()
                 and pending.get("hash") == tg["challenge"] else None)
@@ -878,6 +877,10 @@ def ru_datetime(value):
 @app.route("/")
 def index():
     conn = get_db()
+    user = current_user()
+    token = db.get_setting("telegram_token", "") if not user["admin"] else ""
+    link = employee_telegram_link(user["id"], token) if token else None
+    suggest_telegram = bool(token) and not (link and link["chat_id"])
     stats = {
         "auditoriums": conn.execute("SELECT COUNT(*) FROM auditoriums").fetchone()[0],
         "computers": conn.execute("SELECT COUNT(*) FROM computers").fetchone()[0],
@@ -897,7 +900,7 @@ def index():
     # Открытые заявки: сначала с новыми сообщениями для смотрящего, потом недавно обновлённые.
     open_tickets = [ticket_dict(r) for r in conn.execute(
         TICKETS_SQL + " WHERE t.status IN (%s) ORDER BY t.updated_at DESC, t.id DESC"
-        % ",".join("?" * len(TICKET_OPEN)), (current_user()["id"], *TICKET_OPEN))]
+        % ",".join("?" * len(TICKET_OPEN)), (user["id"], *TICKET_OPEN))]
     open_tickets.sort(key=lambda t: not t["unread"])
     computers = list_computers()
     for c in computers:
@@ -905,7 +908,7 @@ def index():
         c["wol"] = c["status"] != "decommissioned" and bool(netmap.macs_from_note(c["note"]))
     return render_template("index.html", stats=stats, top=top, recent=recent,
                            auditoriums=list_auditoriums(), computers=computers, pc_hostname=pc_hostname,
-                           last_import=last_import, open_tickets=open_tickets)
+                           last_import=last_import, open_tickets=open_tickets, suggest_telegram=suggest_telegram)
 
 
 def wake_computers(computers):
@@ -2964,6 +2967,10 @@ def ticket_delete(ticket_id):
 
 
 # --------------------------------------------------------------------------- Telegram
+
+def employee_telegram_link(user_id, token):
+    return get_db().execute("SELECT chat_id, challenge, expires FROM employee_telegram WHERE user_id=? AND bot_id=?",
+                            (user_id, token.partition(":")[0])).fetchone()
 
 @app.post("/account/telegram")
 def employee_telegram():
